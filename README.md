@@ -142,6 +142,37 @@ Config file location (platform-specific):
 | Linux | `~/.config/Claude/claude_desktop_config.json` |
 | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
 
+
+```json
+{
+  "mcpServers": {
+    "observability": {
+      "command": "/usr/local/bin/docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "-e", "MCP_TRANSPORT=stdio",
+        "-e", "PROMETHEUS_URL=http:///",
+        "-e", "GRAFANA_URL=http://",
+        "-e", "GRAFANA_API_KEY=glsa_key_yourgrafanakeyhere",
+        "-e", "GRAFANA_ORG_ID=1",
+        "-e", "LOG_LEVEL=info",
+        "mcp-observability:local"
+      ]
+    }
+  },
+  "preferences": {
+    "coworkScheduledTasksEnabled": true,
+    "ccdScheduledTasksEnabled": true,
+    "sidebarMode": "chat",
+    "coworkWebSearchEnabled": true
+  }
+}
+```
+
+
+
 ### Native binary
 
 ```json
