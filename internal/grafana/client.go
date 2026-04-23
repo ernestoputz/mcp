@@ -46,7 +46,7 @@ func NewClient(cfg Config) (*Client, error) {
 type DashboardSummary struct {
 	UID     string `json:"uid"`
 	Title   string `json:"title"`
-	Folder  string `json:"folderTitle"`
+	Folder  string `json:"folder"`
 	URL     string `json:"url"`
 	Tags    []any  `json:"tags"`
 }

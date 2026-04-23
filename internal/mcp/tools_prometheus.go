@@ -51,7 +51,7 @@ func (s *Server) toolPrometheusListMetrics(ctx context.Context, args map[string]
 	}
 
 	if filter != "" {
-		var filtered []string
+		filtered := make([]string, 0)
 		for _, m := range metrics {
 			if strings.Contains(m, filter) {
 				filtered = append(filtered, m)
