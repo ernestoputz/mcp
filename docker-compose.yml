@@ -1,0 +1,30 @@
+
+services:
+  mcp-observability:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcp-observability:local
+    ports:
+      - "8080:8080"
+    environment:
+      # Transport: "http" (default) or "stdio"
+      MCP_TRANSPORT: http
+      LOG_LEVEL: info
+      # All sensitive values come from .env (never committed)
+      PROMETHEUS_URL:        ${PROMETHEUS_URL}
+      PROMETHEUS_USERNAME:   ${PROMETHEUS_USERNAME:-}
+      PROMETHEUS_PASSWORD:   ${PROMETHEUS_PASSWORD:-}
+      PROMETHEUS_BEARER_TOKEN: ${PROMETHEUS_BEARER_TOKEN:-}
+      GRAFANA_URL:           ${GRAFANA_URL}
+      GRAFANA_API_KEY:       ${GRAFANA_API_KEY:-}
+      GRAFANA_USERNAME:      ${GRAFANA_USERNAME:-}
+      GRAFANA_PASSWORD:      ${GRAFANA_PASSWORD:-}
+      GRAFANA_ORG_ID:        ${GRAFANA_ORG_ID:-1}
+      MCP_AUTH_TOKEN:        ${MCP_AUTH_TOKEN:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped

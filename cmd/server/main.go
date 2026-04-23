@@ -1,0 +1,72 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/your-org/mcp-observability/internal/mcp"
+	"github.com/your-org/mcp-observability/internal/transport"
+)
+
+func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slogLevel(),
+	}))
+	slog.SetDefault(logger)
+
+	cfg, err := mcp.LoadConfig()
+	if err != nil {
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
+
+	server, err := mcp.NewServer(cfg, logger)
+	if err != nil {
+		slog.Error("failed to create MCP server", "error", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	mode := os.Getenv("MCP_TRANSPORT")
+	if mode == "" {
+		mode = "http" // default
+	}
+
+	switch mode {
+	case "stdio":
+		slog.Info("starting MCP server", "transport", "stdio")
+		if err := transport.RunStdio(ctx, server); err != nil {
+			slog.Error("stdio transport error", "error", err)
+			os.Exit(1)
+		}
+	case "http":
+		addr := fmt.Sprintf("%s:%s", cfg.HTTPHost, cfg.HTTPPort)
+		slog.Info("starting MCP server", "transport", "http+sse", "addr", addr)
+		if err := transport.RunHTTP(ctx, server, addr); err != nil {
+			slog.Error("http transport error", "error", err)
+			os.Exit(1)
+		}
+	default:
+		slog.Error("unknown transport mode", "mode", mode, "valid", []string{"stdio", "http"})
+		os.Exit(1)
+	}
+}
+
+func slogLevel() slog.Level {
+	switch os.Getenv("LOG_LEVEL") {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}

@@ -1,0 +1,221 @@
+---
+# ─── Namespace ────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-observability
+  labels:
+    app.kubernetes.io/name: mcp-observability
+
+---
+# ─── Secret ───────────────────────────────────────────────────────────────────
+# Apply this first via:
+#   kubectl create secret generic mcp-observability-secrets \
+#     --namespace mcp-observability \
+#     --from-literal=PROMETHEUS_URL="http://prometheus:9090" \
+#     --from-literal=GRAFANA_URL="http://grafana:3000" \
+#     --from-literal=GRAFANA_API_KEY="glsa_xxx" \
+#     --from-literal=MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+#
+# The Secret below is a TEMPLATE — values are base64-encoded placeholders.
+# Replace CHANGE_ME values with real base64 strings:
+#   echo -n 'your-value' | base64
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mcp-observability-secrets
+  namespace: mcp-observability
+  labels:
+    app.kubernetes.io/name: mcp-observability
+type: Opaque
+data:
+  # echo -n 'http://prometheus:9090' | base64
+  PROMETHEUS_URL: CHANGE_ME
+  PROMETHEUS_USERNAME: ""
+  PROMETHEUS_PASSWORD: ""
+  PROMETHEUS_BEARER_TOKEN: ""
+  # echo -n 'http://grafana:3000' | base64
+  GRAFANA_URL: CHANGE_ME
+  # echo -n 'glsa_xxxx' | base64
+  GRAFANA_API_KEY: CHANGE_ME
+  GRAFANA_USERNAME: ""
+  GRAFANA_PASSWORD: ""
+  GRAFANA_ORG_ID: MQ==  # "1"
+  # echo -n 'your-random-token' | base64
+  MCP_AUTH_TOKEN: CHANGE_ME
+
+---
+# ─── Deployment ───────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-observability
+  namespace: mcp-observability
+  labels:
+    app.kubernetes.io/name: mcp-observability
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-observability
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-observability
+      annotations:
+        # Force pod restart when secret changes (requires Reloader or manual rollout)
+        kubectl.kubernetes.io/restartedAt: "2024-01-01T00:00:00Z"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: mcp-server
+          image: your-registry/mcp-observability:1.0.0  # ← update this
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          # All secrets injected as environment variables from the K8s Secret
+          envFrom:
+            - secretRef:
+                name: mcp-observability-secrets
+
+          # Non-secret config as plain env
+          env:
+            - name: MCP_TRANSPORT
+              value: "http"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: HTTP_PORT
+              value: "8080"
+            - name: HTTP_HOST
+              value: "0.0.0.0"
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+      # Spread pods across nodes for HA
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: mcp-observability
+
+---
+# ─── Service ──────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-observability
+  namespace: mcp-observability
+  labels:
+    app.kubernetes.io/name: mcp-observability
+spec:
+  selector:
+    app.kubernetes.io/name: mcp-observability
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  type: ClusterIP
+
+---
+# ─── HorizontalPodAutoscaler ──────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mcp-observability
+  namespace: mcp-observability
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mcp-observability
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # 5min cooldown to avoid flapping
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+
+---
+# ─── PodDisruptionBudget ──────────────────────────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mcp-observability
+  namespace: mcp-observability
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-observability
