@@ -21,9 +21,27 @@ Written in Go — single static binary, minimal container (~10 MB), Kubernetes-n
 |------|-------------|
 | `grafana_list_dashboards` | List dashboards (with search + folder filter) |
 | `grafana_get_dashboard` | Fetch full dashboard JSON by UID |
-| `grafana_create_dashboard` | Create a dashboard from PromQL expressions |
+| `grafana_create_dashboard` | Create a dashboard with human-titled panels (structured JSON) |
+| `grafana_update_dashboard` | Update an existing dashboard (rename, replace panels, retag) |
 | `grafana_list_alert_rules` | List Grafana-managed alert rules |
 | `grafana_create_alert` | Create a Grafana alert from a PromQL expression |
+
+### Dashboard authoring — panel titles
+
+Panels can be authored in two ways:
+
+- **`panels`** (preferred) — JSON array of specs, each with a human-readable `title` distinct from the PromQL expression:
+  ```json
+  [
+    {"title":"HTTP Requests/s","expr":"rate(http_requests_total[5m])","legend":"{{handler}}","unit":"reqps"},
+    {"title":"CPU %","expr":"avg(rate(node_cpu_seconds_total[5m]))","unit":"percentunit"}
+  ]
+  ```
+  Supported per-panel fields: `title`, `expr` (both required), `legend`, `unit`, `description`, `type` (`timeseries`, `stat`, `gauge`, `bargauge`).
+
+- **`metrics`** (legacy shortcut) — comma-separated PromQL expressions; each becomes a panel titled with the expression itself. Use only for quick prototyping.
+
+Use `grafana_update_dashboard` to rename panels or the dashboard without recreating it.
 
 **Deliberately excluded (security):** admin APIs, token creation, direct Prometheus write, delete operations.
 
@@ -116,13 +134,21 @@ All credentials are injected via a Kubernetes Secret. The `make k8s-secret` targ
 
 ## Claude Desktop (stdio mode)
 
-Add to `~/.config/claude/claude_desktop_config.json`:
+Config file location (platform-specific):
+
+| OS | Path |
+|----|------|
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Linux | `~/.config/Claude/claude_desktop_config.json` |
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+
+### Native binary
 
 ```json
 {
   "mcpServers": {
     "observability": {
-      "command": "/path/to/mcp-server",
+      "command": "/absolute/path/to/bin/mcp-server",
       "env": {
         "MCP_TRANSPORT": "stdio",
         "PROMETHEUS_URL": "http://localhost:9090",
@@ -134,25 +160,33 @@ Add to `~/.config/claude/claude_desktop_config.json`:
 }
 ```
 
-Or with Docker:
+### Docker
+
+Use the absolute path to `docker` (Claude Desktop does not inherit your shell `PATH` — find yours with `which docker`):
 
 ```json
 {
   "mcpServers": {
     "observability": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i",
-        "--network", "host",
+      "command": "/usr/local/bin/docker",
+      "args": [
+        "run", "--rm", "-i",
         "-e", "MCP_TRANSPORT=stdio",
-        "-e", "PROMETHEUS_URL=http://localhost:9090",
-        "-e", "GRAFANA_URL=http://localhost:3000",
+        "-e", "PROMETHEUS_URL=http://prometheus.example:9090/",
+        "-e", "GRAFANA_URL=http://grafana.example:3000/",
         "-e", "GRAFANA_API_KEY=glsa_xxx",
-        "mcp-observability:latest"
+        "mcp-observability:local"
       ]
     }
   }
 }
 ```
+
+After editing the config, fully quit and reopen Claude Desktop — it only reads the file on startup.
+
+> Notes
+> - In stdio mode, stdout is reserved for JSON-RPC; all server logs go to stderr.
+> - When targeting Prometheus/Grafana on `127.0.0.1` of the host (not a LAN IP), add `--network host` (Linux) or replace the URL host with `host.docker.internal` (macOS/Windows).
 
 ---
 
@@ -210,7 +244,7 @@ Each step is in a different file to make diffs clean and LLM-navigable.
 ## Security Notes
 
 - The server **never writes to Prometheus** — only reads via HTTP API
-- Grafana write operations are **scoped**: create dashboards and alerts only
+- Grafana write operations are **scoped**: create/update dashboards and create alerts only (no delete)
 - Admin APIs (user management, token creation, org management) are **not exposed**
 - Run as non-root UID 65532 in container
 - `readOnlyRootFilesystem: true` in Kubernetes

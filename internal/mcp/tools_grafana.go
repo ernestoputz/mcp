@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -47,25 +48,30 @@ func (s *Server) toolGrafanaCreateDashboard(ctx context.Context, args map[string
 	if err != nil {
 		return ToolResult{}, err
 	}
-	metricsStr, err := strArg(args, "metrics")
+
+	panelsStr := strArgOpt(args, "panels", "")
+	metricsStr := strArgOpt(args, "metrics", "")
+
+	panels, err := parsePanels(panelsStr, metricsStr)
 	if err != nil {
 		return ToolResult{}, err
+	}
+	if len(panels) == 0 {
+		return ToolResult{}, fmt.Errorf("must provide at least one panel: set `panels` (preferred) or `metrics`")
 	}
 
 	folder := strArgOpt(args, "folder", "General")
 	tagsStr := strArgOpt(args, "tags", "")
-
-	metrics := splitTrim(metricsStr)
 	var tags []string
 	if tagsStr != "" {
 		tags = splitTrim(tagsStr)
 	}
 
 	req := grafana.CreateDashboardRequest{
-		Title:   title,
-		Metrics: metrics,
-		Folder:  folder,
-		Tags:    tags,
+		Title:  title,
+		Panels: panels,
+		Folder: folder,
+		Tags:   tags,
 	}
 
 	result, err := s.graf.CreateDashboard(ctx, req)
@@ -73,6 +79,67 @@ func (s *Server) toolGrafanaCreateDashboard(ctx context.Context, args map[string
 		return ToolResult{}, fmt.Errorf("creating dashboard: %w", err)
 	}
 	return jsonResult(result)
+}
+
+func (s *Server) toolGrafanaUpdateDashboard(ctx context.Context, args map[string]any) (ToolResult, error) {
+	uid, err := strArg(args, "uid")
+	if err != nil {
+		return ToolResult{}, err
+	}
+	title := strArgOpt(args, "title", "")
+	panelsStr := strArgOpt(args, "panels", "")
+	tagsStr := strArgOpt(args, "tags", "")
+
+	var panels []grafana.PanelSpec
+	if panelsStr != "" {
+		panels, err = parsePanels(panelsStr, "")
+		if err != nil {
+			return ToolResult{}, err
+		}
+	}
+	var tags []string
+	if tagsStr != "" {
+		tags = splitTrim(tagsStr)
+	}
+
+	req := grafana.UpdateDashboardRequest{
+		UID:    uid,
+		Title:  title,
+		Panels: panels,
+		Tags:   tags,
+	}
+
+	result, err := s.graf.UpdateDashboard(ctx, req)
+	if err != nil {
+		return ToolResult{}, fmt.Errorf("updating dashboard: %w", err)
+	}
+	return jsonResult(result)
+}
+
+// parsePanels prefers the structured `panels` JSON; falls back to the legacy
+// comma-separated `metrics` form where the PromQL expression becomes the title.
+func parsePanels(panelsJSON, metricsCSV string) ([]grafana.PanelSpec, error) {
+	if panelsJSON != "" {
+		var specs []grafana.PanelSpec
+		if err := json.Unmarshal([]byte(panelsJSON), &specs); err != nil {
+			return nil, fmt.Errorf("invalid `panels` JSON: %w", err)
+		}
+		for i, p := range specs {
+			if p.Expr == "" {
+				return nil, fmt.Errorf("panel[%d]: `expr` is required", i)
+			}
+		}
+		return specs, nil
+	}
+	if metricsCSV != "" {
+		metrics := splitTrim(metricsCSV)
+		out := make([]grafana.PanelSpec, 0, len(metrics))
+		for _, m := range metrics {
+			out = append(out, grafana.PanelSpec{Title: m, Expr: m})
+		}
+		return out, nil
+	}
+	return nil, nil
 }
 
 func (s *Server) toolGrafanaListAlertRules(ctx context.Context, args map[string]any) (ToolResult, error) {

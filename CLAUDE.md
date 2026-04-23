@@ -23,7 +23,7 @@ go test ./internal/mcp/... -run TestFunctionName -v
 
 ## Architecture
 
-This is a **Model Context Protocol (MCP) server** written in Go that bridges LLMs (Claude, etc.) to Prometheus and Grafana APIs. It exposes 12 tools (7 Prometheus, 5 Grafana) via JSON-RPC 2.0.
+This is a **Model Context Protocol (MCP) server** written in Go that bridges LLMs (Claude, etc.) to Prometheus and Grafana APIs. It exposes 13 tools (7 Prometheus, 6 Grafana) via JSON-RPC 2.0.
 
 **Transport layer** (`internal/transport/`): Two transports exist — HTTP+SSE for remote clients/Claude API (`http.go`) and newline-delimited JSON over stdio for Claude Desktop (`stdio.go`). Transport is selected at startup via `MCP_TRANSPORT` env var.
 

@@ -124,17 +124,36 @@ func (s *Server) buildToolRegistry() map[string]Tool {
 		},
 
 		"grafana_create_dashboard": {
-			Name:        "grafana_create_dashboard",
-			Description: "Create a new Grafana dashboard with one or more panels backed by Prometheus metrics.",
+			Name: "grafana_create_dashboard",
+			Description: "Create a Grafana dashboard with one or more panels. " +
+				"Prefer the `panels` argument to give each panel a human-readable title instead of showing the raw PromQL expression. " +
+				"`metrics` is kept as a shortcut for quick prototyping and uses the expression itself as the panel title.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]Property{
-					"title":   {Type: "string", Description: "Dashboard title"},
-					"metrics": {Type: "string", Description: "Comma-separated list of PromQL expressions for panels, e.g. rate(http_requests_total[5m]),up"},
+					"title": {Type: "string", Description: "Dashboard title"},
+					"panels": {Type: "string", Description: "JSON array of panel specs. Each item: {\"title\":\"HTTP Requests/s\",\"expr\":\"rate(http_requests_total[5m])\",\"legend\":\"{{instance}}\",\"unit\":\"reqps\",\"description\":\"...\",\"type\":\"timeseries|stat|gauge|bargauge\"}. " +
+						"Only title and expr are required. Example: [{\"title\":\"CPU %\",\"expr\":\"avg(rate(node_cpu_seconds_total[5m]))\",\"unit\":\"percentunit\"}]"},
+					"metrics": {Type: "string", Description: "(Legacy / quick mode) Comma-separated PromQL expressions; each becomes a panel titled with the expression itself. Ignored if `panels` is provided."},
 					"folder":  {Type: "string", Description: "Grafana folder name. Defaults to General."},
 					"tags":    {Type: "string", Description: "Comma-separated tags to apply to the dashboard"},
 				},
-				Required: []string{"title", "metrics"},
+				Required: []string{"title"},
+			},
+		},
+
+		"grafana_update_dashboard": {
+			Name:        "grafana_update_dashboard",
+			Description: "Update an existing Grafana dashboard by UID. Use to rename the dashboard, replace its panels (e.g. give them human titles), or change tags. Any field left empty keeps its current value; providing `panels` replaces the panel list entirely.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"uid":    {Type: "string", Description: "Dashboard UID (from grafana_list_dashboards)"},
+					"title":  {Type: "string", Description: "New dashboard title. Leave empty to keep the current one."},
+					"panels": {Type: "string", Description: "JSON array of panel specs (same format as grafana_create_dashboard). If provided, replaces the existing panels."},
+					"tags":   {Type: "string", Description: "Comma-separated tags. Leave empty to keep existing tags."},
+				},
+				Required: []string{"uid"},
 			},
 		},
 

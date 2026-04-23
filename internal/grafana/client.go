@@ -59,9 +59,27 @@ type DashboardResult struct {
 
 type CreateDashboardRequest struct {
 	Title   string
-	Metrics []string
+	Panels  []PanelSpec
 	Folder  string
 	Tags    []string
+}
+
+// PanelSpec describes a single dashboard panel in human terms.
+// Only Title and Expr are required; the rest have sensible defaults.
+type PanelSpec struct {
+	Title       string `json:"title"`
+	Expr        string `json:"expr"`
+	Legend      string `json:"legend,omitempty"`      // legendFormat, e.g. "{{instance}}"
+	Unit        string `json:"unit,omitempty"`        // Grafana unit id, e.g. "short", "percent", "reqps", "bytes"
+	Description string `json:"description,omitempty"` // Panel description shown on hover
+	Type        string `json:"type,omitempty"`        // Panel type: timeseries (default), stat, gauge, bargauge
+}
+
+type UpdateDashboardRequest struct {
+	UID    string
+	Title  string      // optional, empty = keep existing
+	Panels []PanelSpec // optional, empty = keep existing panels
+	Tags   []string    // optional, nil = keep existing
 }
 
 type CreateAlertRequest struct {
@@ -106,9 +124,9 @@ func (c *Client) GetDashboard(ctx context.Context, uid string) (any, error) {
 
 // CreateDashboard creates a new Grafana dashboard with time-series panels.
 func (c *Client) CreateDashboard(ctx context.Context, req CreateDashboardRequest) (*DashboardResult, error) {
-	panels := make([]map[string]any, 0, len(req.Metrics))
-	for i, metric := range req.Metrics {
-		panels = append(panels, buildPanel(i+1, metric))
+	panels := make([]map[string]any, 0, len(req.Panels))
+	for i, p := range req.Panels {
+		panels = append(panels, buildPanel(i+1, p))
 	}
 
 	dashModel := map[string]any{
@@ -131,6 +149,56 @@ func (c *Client) CreateDashboard(ctx context.Context, req CreateDashboardRequest
 		folderID, err := c.getFolderID(ctx, req.Folder)
 		if err == nil && folderID > 0 {
 			payload["folderId"] = folderID
+		}
+	}
+
+	var result DashboardResult
+	if err := c.postJSON(ctx, "/api/dashboards/db", payload, &result); err != nil {
+		return nil, err
+	}
+	result.URL = c.baseURL + result.URL
+	return &result, nil
+}
+
+// UpdateDashboard applies partial updates to an existing dashboard: title, panels, tags.
+// It fetches the current dashboard, mutates it, and re-saves with overwrite=true.
+// Empty fields in req preserve the existing value.
+func (c *Client) UpdateDashboard(ctx context.Context, req UpdateDashboardRequest) (*DashboardResult, error) {
+	current, err := c.GetDashboard(ctx, req.UID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching dashboard %s: %w", req.UID, err)
+	}
+	root, ok := current.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected dashboard response shape")
+	}
+	dash, ok := root["dashboard"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("dashboard payload missing")
+	}
+
+	if req.Title != "" {
+		dash["title"] = req.Title
+	}
+	if req.Tags != nil {
+		dash["tags"] = req.Tags
+	}
+	if len(req.Panels) > 0 {
+		panels := make([]map[string]any, 0, len(req.Panels))
+		for i, p := range req.Panels {
+			panels = append(panels, buildPanel(i+1, p))
+		}
+		dash["panels"] = panels
+	}
+
+	payload := map[string]any{
+		"dashboard": dash,
+		"overwrite": true,
+		"message":   "Updated by mcp-observability",
+	}
+	if meta, ok := root["meta"].(map[string]any); ok {
+		if folderID, ok := meta["folderId"].(float64); ok && folderID > 0 {
+			payload["folderId"] = int(folderID)
 		}
 	}
 
@@ -246,11 +314,31 @@ func (c *Client) CreateAlertRule(ctx context.Context, req CreateAlertRequest) (a
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-func buildPanel(id int, metric string) map[string]any {
-	return map[string]any{
+func buildPanel(id int, p PanelSpec) map[string]any {
+	title := p.Title
+	if title == "" {
+		title = p.Expr // last-resort fallback
+	}
+	legend := p.Legend
+	if legend == "" {
+		legend = "{{instance}}"
+	}
+	panelType := p.Type
+	if panelType == "" {
+		panelType = "timeseries"
+	}
+
+	fieldConfig := map[string]any{
+		"defaults": map[string]any{},
+	}
+	if p.Unit != "" {
+		fieldConfig["defaults"].(map[string]any)["unit"] = p.Unit
+	}
+
+	panel := map[string]any{
 		"id":    id,
-		"type":  "timeseries",
-		"title": metric,
+		"type":  panelType,
+		"title": title,
 		"gridPos": map[string]int{
 			"x": ((id - 1) % 2) * 12,
 			"y": ((id - 1) / 2) * 8,
@@ -259,15 +347,20 @@ func buildPanel(id int, metric string) map[string]any {
 		},
 		"targets": []map[string]any{
 			{
-				"expr":         metric,
+				"expr":         p.Expr,
 				"refId":        "A",
-				"legendFormat": "{{instance}}",
+				"legendFormat": legend,
 			},
 		},
 		"options": map[string]any{
 			"tooltip": map[string]string{"mode": "single"},
 		},
+		"fieldConfig": fieldConfig,
 	}
+	if p.Description != "" {
+		panel["description"] = p.Description
+	}
+	return panel
 }
 
 func (c *Client) getFolderID(ctx context.Context, name string) (int, error) {

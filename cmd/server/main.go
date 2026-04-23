@@ -13,7 +13,8 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	// Logs must go to stderr — stdout is reserved for the stdio JSON-RPC channel.
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slogLevel(),
 	}))
 	slog.SetDefault(logger)

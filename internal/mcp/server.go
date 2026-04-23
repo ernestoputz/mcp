@@ -157,6 +157,7 @@ func (s *Server) toolHandlers() map[string]func(ctx context.Context, args map[st
 		"grafana_list_dashboards":  s.toolGrafanaListDashboards,
 		"grafana_get_dashboard":    s.toolGrafanaGetDashboard,
 		"grafana_create_dashboard": s.toolGrafanaCreateDashboard,
+		"grafana_update_dashboard": s.toolGrafanaUpdateDashboard,
 		"grafana_list_alert_rules": s.toolGrafanaListAlertRules,
 		"grafana_create_alert":     s.toolGrafanaCreateAlert,
 	}
