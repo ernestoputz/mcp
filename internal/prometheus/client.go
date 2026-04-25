@@ -173,6 +173,32 @@ func (c *Client) Rules(ctx context.Context, ruleType string) (any, error) {
 	return c.get(ctx, "/api/v1/rules", params)
 }
 
+// Targets returns scrape target discovery info. state may be "active", "dropped", or "any" (default).
+func (c *Client) Targets(ctx context.Context, state string) (any, error) {
+	params := url.Values{}
+	if state != "" {
+		params.Set("state", state)
+	}
+	return c.get(ctx, "/api/v1/targets", params)
+}
+
+// Metadata returns metric metadata (type, help, unit). If metric is set, filters to that name.
+func (c *Client) Metadata(ctx context.Context, metric, limit string) (any, error) {
+	params := url.Values{}
+	if metric != "" {
+		params.Set("metric", metric)
+	}
+	if limit != "" {
+		params.Set("limit", limit)
+	}
+	return c.get(ctx, "/api/v1/metadata", params)
+}
+
+// TSDBStatus returns TSDB head stats and top cardinality dimensions.
+func (c *Client) TSDBStatus(ctx context.Context) (any, error) {
+	return c.get(ctx, "/api/v1/status/tsdb", nil)
+}
+
 // ─── HTTP internals ───────────────────────────────────────────────────────────
 
 // get performs an authenticated GET and returns the parsed .data field.

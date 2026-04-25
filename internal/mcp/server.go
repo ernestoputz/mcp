@@ -153,6 +153,9 @@ func (s *Server) toolHandlers() map[string]func(ctx context.Context, args map[st
 		"prometheus_series":       s.toolPrometheusSeries,
 		"prometheus_alerts":       s.toolPrometheusAlerts,
 		"prometheus_rules":        s.toolPrometheusRules,
+		"prometheus_targets":      s.toolPrometheusTargets,
+		"prometheus_metadata":     s.toolPrometheusMetadata,
+		"prometheus_tsdb_status":  s.toolPrometheusTSDBStatus,
 		// ── Grafana ─────────────────────────────────────────────────────────
 		"grafana_list_dashboards":  s.toolGrafanaListDashboards,
 		"grafana_get_dashboard":    s.toolGrafanaGetDashboard,
@@ -160,6 +163,9 @@ func (s *Server) toolHandlers() map[string]func(ctx context.Context, args map[st
 		"grafana_update_dashboard": s.toolGrafanaUpdateDashboard,
 		"grafana_list_alert_rules": s.toolGrafanaListAlertRules,
 		"grafana_create_alert":     s.toolGrafanaCreateAlert,
+		"grafana_list_datasources": s.toolGrafanaListDatasources,
+		"grafana_test_datasource":  s.toolGrafanaTestDatasource,
+		"grafana_query_datasource": s.toolGrafanaQueryDatasource,
 	}
 }
 

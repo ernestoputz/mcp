@@ -131,3 +131,30 @@ func (s *Server) toolPrometheusRules(ctx context.Context, args map[string]any) (
 	}
 	return jsonResult(rules)
 }
+
+func (s *Server) toolPrometheusTargets(ctx context.Context, args map[string]any) (ToolResult, error) {
+	state := strArgOpt(args, "state", "")
+	targets, err := s.prom.Targets(ctx, state)
+	if err != nil {
+		return ToolResult{}, fmt.Errorf("fetching targets: %w", err)
+	}
+	return jsonResult(targets)
+}
+
+func (s *Server) toolPrometheusMetadata(ctx context.Context, args map[string]any) (ToolResult, error) {
+	metric := strArgOpt(args, "metric", "")
+	limit := strArgOpt(args, "limit", "")
+	metadata, err := s.prom.Metadata(ctx, metric, limit)
+	if err != nil {
+		return ToolResult{}, fmt.Errorf("fetching metadata: %w", err)
+	}
+	return jsonResult(metadata)
+}
+
+func (s *Server) toolPrometheusTSDBStatus(ctx context.Context, _ map[string]any) (ToolResult, error) {
+	status, err := s.prom.TSDBStatus(ctx)
+	if err != nil {
+		return ToolResult{}, fmt.Errorf("fetching TSDB status: %w", err)
+	}
+	return jsonResult(status)
+}

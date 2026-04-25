@@ -97,6 +97,42 @@ func (s *Server) buildToolRegistry() map[string]Tool {
 			},
 		},
 
+		"prometheus_targets": {
+			Name:        "prometheus_targets",
+			Description: "List Prometheus scrape targets with health, last scrape time and last error. Useful for diagnosing broken collection.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"state": {
+						Type:        "string",
+						Description: "Filter by target state. Defaults to any.",
+						Enum:        []string{"active", "dropped", "any", ""},
+					},
+				},
+			},
+		},
+
+		"prometheus_metadata": {
+			Name:        "prometheus_metadata",
+			Description: "Return metric metadata (type, help text, unit) so the caller can build PromQL with full semantic context.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"metric": {Type: "string", Description: "Optional metric name to filter by. Leave empty for all metrics."},
+					"limit":  {Type: "string", Description: "Optional max number of metrics to return."},
+				},
+			},
+		},
+
+		"prometheus_tsdb_status": {
+			Name:        "prometheus_tsdb_status",
+			Description: "Return TSDB head stats and top cardinality dimensions (top series by label, top label-value counts). Use to investigate cardinality explosions.",
+			InputSchema: InputSchema{
+				Type:       "object",
+				Properties: map[string]Property{},
+			},
+		},
+
 		// ── Grafana ───────────────────────────────────────────────────────────
 		"grafana_list_dashboards": {
 			Name:        "grafana_list_dashboards",
@@ -165,6 +201,43 @@ func (s *Server) buildToolRegistry() map[string]Tool {
 				Properties: map[string]Property{
 					"namespace": {Type: "string", Description: "Optional folder/namespace to filter by"},
 				},
+			},
+		},
+
+		"grafana_list_datasources": {
+			Name:        "grafana_list_datasources",
+			Description: "List all datasources configured in Grafana (Prometheus, Loki, Tempo, etc.). Returns name, type, UID and URL for each.",
+			InputSchema: InputSchema{
+				Type:       "object",
+				Properties: map[string]Property{},
+			},
+		},
+
+		"grafana_test_datasource": {
+			Name:        "grafana_test_datasource",
+			Description: "Probe a Grafana datasource health endpoint by UID. Returns whether the datasource is reachable and any error from the backend.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"uid": {Type: "string", Description: "Datasource UID (from grafana_list_datasources)"},
+				},
+				Required: []string{"uid"},
+			},
+		},
+
+		"grafana_query_datasource": {
+			Name: "grafana_query_datasource",
+			Description: "Execute an ad-hoc query against any Grafana datasource via /api/ds/query. " +
+				"Use the appropriate expression for the datasource type (PromQL for Prometheus, LogQL for Loki, etc.).",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"datasource_uid": {Type: "string", Description: "Target datasource UID (from grafana_list_datasources)"},
+					"query":          {Type: "string", Description: "Query expression to execute (e.g. PromQL, LogQL)"},
+					"from":           {Type: "string", Description: "Start time as epoch milliseconds (string). Defaults to 1h ago."},
+					"to":             {Type: "string", Description: "End time as epoch milliseconds (string). Defaults to now."},
+				},
+				Required: []string{"datasource_uid", "query"},
 			},
 		},
 

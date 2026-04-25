@@ -188,6 +188,45 @@ func (s *Server) toolGrafanaCreateAlert(ctx context.Context, args map[string]any
 	return jsonResult(result)
 }
 
+func (s *Server) toolGrafanaListDatasources(ctx context.Context, _ map[string]any) (ToolResult, error) {
+	ds, err := s.graf.ListDatasources(ctx)
+	if err != nil {
+		return ToolResult{}, fmt.Errorf("listing datasources: %w", err)
+	}
+	return jsonResult(ds)
+}
+
+func (s *Server) toolGrafanaTestDatasource(ctx context.Context, args map[string]any) (ToolResult, error) {
+	uid, err := strArg(args, "uid")
+	if err != nil {
+		return ToolResult{}, err
+	}
+	health, err := s.graf.TestDatasource(ctx, uid)
+	if err != nil {
+		return ToolResult{}, fmt.Errorf("testing datasource: %w", err)
+	}
+	return jsonResult(health)
+}
+
+func (s *Server) toolGrafanaQueryDatasource(ctx context.Context, args map[string]any) (ToolResult, error) {
+	uid, err := strArg(args, "datasource_uid")
+	if err != nil {
+		return ToolResult{}, err
+	}
+	query, err := strArg(args, "query")
+	if err != nil {
+		return ToolResult{}, err
+	}
+	from := strArgOpt(args, "from", "")
+	to := strArgOpt(args, "to", "")
+
+	result, err := s.graf.QueryDatasource(ctx, uid, query, from, to)
+	if err != nil {
+		return ToolResult{}, fmt.Errorf("querying datasource: %w", err)
+	}
+	return jsonResult(result)
+}
+
 func splitTrim(s string) []string {
 	parts := strings.Split(s, ",")
 	out := make([]string, 0, len(parts))

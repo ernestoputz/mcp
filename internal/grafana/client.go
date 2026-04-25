@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -307,6 +308,56 @@ func (c *Client) CreateAlertRule(ctx context.Context, req CreateAlertRequest) (a
 
 	var result any
 	if err := c.postJSON(ctx, "/api/v1/provisioning/alert-rules", rule, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ─── Datasource methods ───────────────────────────────────────────────────────
+
+// ListDatasources returns all configured datasources (Prometheus, Loki, Tempo, etc.).
+func (c *Client) ListDatasources(ctx context.Context) (any, error) {
+	var result any
+	if err := c.getJSON(ctx, "/api/datasources", nil, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// TestDatasource probes a datasource health endpoint by UID.
+func (c *Client) TestDatasource(ctx context.Context, uid string) (any, error) {
+	var result any
+	if err := c.getJSON(ctx, "/api/datasources/uid/"+url.PathEscape(uid)+"/health", nil, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// QueryDatasource executes an ad-hoc query against a Grafana datasource via /api/ds/query.
+// Works for Prometheus (PromQL), Loki (LogQL), etc. — the expression is passed in `expr`.
+// from/to accept epoch millis as strings; if empty, defaults to the last 1h window.
+func (c *Client) QueryDatasource(ctx context.Context, datasourceUID, query, from, to string) (any, error) {
+	if from == "" {
+		from = strconv.FormatInt(time.Now().Add(-1*time.Hour).UnixMilli(), 10)
+	}
+	if to == "" {
+		to = strconv.FormatInt(time.Now().UnixMilli(), 10)
+	}
+	payload := map[string]any{
+		"from": from,
+		"to":   to,
+		"queries": []map[string]any{
+			{
+				"refId":         "A",
+				"datasource":    map[string]string{"uid": datasourceUID},
+				"expr":          query,
+				"intervalMs":    60000,
+				"maxDataPoints": 1000,
+			},
+		},
+	}
+	var result any
+	if err := c.postJSON(ctx, "/api/ds/query", payload, &result); err != nil {
 		return nil, err
 	}
 	return result, nil
