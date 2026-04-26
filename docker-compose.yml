@@ -6,11 +6,12 @@ services:
       dockerfile: Dockerfile
     image: mcp-observability:local
     ports:
-      - "8080:8080"
+      - "${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
     environment:
       # Transport: "http" (default) or "stdio"
       MCP_TRANSPORT: http
       LOG_LEVEL: info
+      HTTP_PORT:             ${HTTP_PORT:-8080}
       # All sensitive values come from .env (never committed)
       PROMETHEUS_URL:        ${PROMETHEUS_URL}
       PROMETHEUS_USERNAME:   ${PROMETHEUS_USERNAME:-}
@@ -22,8 +23,15 @@ services:
       GRAFANA_PASSWORD:      ${GRAFANA_PASSWORD:-}
       GRAFANA_ORG_ID:        ${GRAFANA_ORG_ID:-1}
       MCP_AUTH_TOKEN:        ${MCP_AUTH_TOKEN:-}
+      # HTTPS — set both to enable TLS. Paths are inside the container.
+      TLS_CERT_FILE:         ${TLS_CERT_FILE:-}
+      TLS_KEY_FILE:          ${TLS_KEY_FILE:-}
+    volumes:
+      # Mount your certs into /certs (read-only). Leave empty to skip TLS.
+      - ./certs:/certs:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      # Switches between http and https based on TLS_CERT_FILE.
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- ${TLS_CERT_FILE:+https}${TLS_CERT_FILE:-http}://localhost:${HTTP_PORT:-8080}/healthz || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3

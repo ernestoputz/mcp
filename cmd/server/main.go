@@ -48,8 +48,12 @@ func main() {
 		}
 	case "http":
 		addr := fmt.Sprintf("%s:%s", cfg.HTTPHost, cfg.HTTPPort)
-		slog.Info("starting MCP server", "transport", "http+sse", "addr", addr)
-		if err := transport.RunHTTP(ctx, server, addr); err != nil {
+		scheme := "http+sse"
+		if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+			scheme = "https+sse"
+		}
+		slog.Info("starting MCP server", "transport", scheme, "addr", addr)
+		if err := transport.RunHTTP(ctx, server, addr, cfg.TLSCertFile, cfg.TLSKeyFile); err != nil {
 			slog.Error("http transport error", "error", err)
 			os.Exit(1)
 		}

@@ -27,6 +27,10 @@ type Config struct {
 	HTTPHost string // HTTP_HOST (default: 0.0.0.0)
 	HTTPPort string // HTTP_PORT (default: 8080)
 
+	// TLS — if both files are set, the HTTP transport serves HTTPS instead of plain HTTP.
+	TLSCertFile string // TLS_CERT_FILE (PEM-encoded certificate)
+	TLSKeyFile  string // TLS_KEY_FILE  (PEM-encoded private key)
+
 	// Optional auth for the MCP server itself
 	MCPAuthToken string // MCP_AUTH_TOKEN (Bearer token clients must send)
 }
@@ -48,6 +52,8 @@ func LoadConfig() (*Config, error) {
 
 		HTTPHost:     envOrDefault("HTTP_HOST", "0.0.0.0"),
 		HTTPPort:     envOrDefault("HTTP_PORT", "8080"),
+		TLSCertFile:  os.Getenv("TLS_CERT_FILE"),
+		TLSKeyFile:   os.Getenv("TLS_KEY_FILE"),
 		MCPAuthToken: os.Getenv("MCP_AUTH_TOKEN"),
 	}
 
@@ -61,6 +67,9 @@ func LoadConfig() (*Config, error) {
 	}
 	if cfg.GrafanaAPIKey == "" && (cfg.GrafanaUsername == "" || cfg.GrafanaPassword == "") {
 		errs = append(errs, "Grafana auth required: set GRAFANA_API_KEY or both GRAFANA_USERNAME+GRAFANA_PASSWORD")
+	}
+	if (cfg.TLSCertFile == "") != (cfg.TLSKeyFile == "") {
+		errs = append(errs, "TLS_CERT_FILE and TLS_KEY_FILE must be set together")
 	}
 
 	if len(errs) > 0 {

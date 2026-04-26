@@ -15,6 +15,7 @@ import (
 )
 
 // RunHTTP starts the HTTP + SSE transport.
+// If certFile and keyFile are both non-empty the server listens with TLS (HTTPS).
 // Endpoints:
 //
 //	POST /mcp         — JSON-RPC over plain HTTP (stateless, Claude API / remote)
@@ -22,7 +23,7 @@ import (
 //	POST /mcp/message — SSE message endpoint
 //	GET  /healthz     — liveness probe
 //	GET  /readyz      — readiness probe
-func RunHTTP(ctx context.Context, srv *mcp.Server, addr string) error {
+func RunHTTP(ctx context.Context, srv *mcp.Server, addr, certFile, keyFile string) error {
 	h := &httpHandler{srv: srv}
 
 	mux := http.NewServeMux()
@@ -40,8 +41,14 @@ func RunHTTP(ctx context.Context, srv *mcp.Server, addr string) error {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	tlsEnabled := certFile != "" && keyFile != ""
 	errCh := make(chan error, 1)
 	go func() {
+		if tlsEnabled {
+			slog.Info("HTTPS server listening", "addr", addr, "cert", certFile)
+			errCh <- httpSrv.ListenAndServeTLS(certFile, keyFile)
+			return
+		}
 		slog.Info("HTTP server listening", "addr", addr)
 		errCh <- httpSrv.ListenAndServe()
 	}()
