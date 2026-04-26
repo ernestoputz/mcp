@@ -26,6 +26,11 @@ services:
       # HTTPS — set both to enable TLS. Paths are inside the container.
       TLS_CERT_FILE:         ${TLS_CERT_FILE:-}
       TLS_KEY_FILE:          ${TLS_KEY_FILE:-}
+      # OAuth 2.0 — set OAUTH_CLIENT_ID to enable. See .env.example for details.
+      OAUTH_ISSUER:          ${OAUTH_ISSUER:-}
+      OAUTH_CLIENT_ID:       ${OAUTH_CLIENT_ID:-}
+      OAUTH_CLIENT_SECRET:   ${OAUTH_CLIENT_SECRET:-}
+      OAUTH_SIGNING_KEY:     ${OAUTH_SIGNING_KEY:-}
     volumes:
       # Mount your certs into /certs (read-only). Leave empty to skip TLS.
       - ./certs:/certs:ro

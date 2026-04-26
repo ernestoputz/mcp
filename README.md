@@ -15,6 +15,9 @@ Written in Go — single static binary, minimal container (~10 MB), Kubernetes-n
 | `prometheus_series` | Find series matching a selector |
 | `prometheus_alerts` | Currently firing alerts |
 | `prometheus_rules` | Alerting + recording rules (read-only) |
+| `prometheus_targets` | Scrape targets with health, last scrape, last error |
+| `prometheus_metadata` | Metric metadata (type, help, unit) |
+| `prometheus_tsdb_status` | TSDB head stats + top cardinality dimensions |
 
 ### Grafana (read + structured write)
 | Tool | Description |
@@ -25,6 +28,9 @@ Written in Go — single static binary, minimal container (~10 MB), Kubernetes-n
 | `grafana_update_dashboard` | Update an existing dashboard (rename, replace panels, retag) |
 | `grafana_list_alert_rules` | List Grafana-managed alert rules |
 | `grafana_create_alert` | Create a Grafana alert from a PromQL expression |
+| `grafana_list_datasources` | List configured datasources (Prometheus, Loki, Tempo, …) |
+| `grafana_test_datasource` | Probe a datasource health endpoint by UID |
+| `grafana_query_datasource` | Ad-hoc query against any datasource via `/api/ds/query` |
 
 ### Dashboard authoring — panel titles
 
@@ -74,6 +80,98 @@ curl -X POST http://localhost:8080/mcp \
 
 ---
 
+## HTTPS (optional)
+
+The HTTP transport listens with TLS when both `TLS_CERT_FILE` and `TLS_KEY_FILE`
+are set. The compose file mounts `./certs` to `/certs:ro` and the healthcheck
+adapts to the chosen scheme automatically.
+
+```bash
+# 1. Generate a self-signed cert for development
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+  -keyout certs/server.key -out certs/server.crt \
+  -subj "/CN=localhost"
+chmod 644 certs/server.key certs/server.crt   # readable by container's nonroot UID
+
+# 2. Add to .env
+cat >> .env <<EOF
+HTTP_PORT=8443
+TLS_CERT_FILE=/certs/server.crt
+TLS_KEY_FILE=/certs/server.key
+EOF
+
+# 3. Restart
+docker compose up -d
+curl -k https://localhost:8443/healthz
+```
+
+For production, replace the self-signed pair with a real certificate
+(Let's Encrypt, internal CA, etc.). The server reloads on container restart.
+
+---
+
+## OAuth 2.0 (required by claude.ai)
+
+The server implements OAuth 2.1 Authorization Code flow with PKCE (RFC 7636).
+Access and refresh tokens are stateless JWTs (HS256). When `OAUTH_CLIENT_ID`
+is set, OAuth replaces `MCP_AUTH_TOKEN` and the following endpoints become
+available:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /.well-known/oauth-authorization-server` | RFC 8414 metadata |
+| `GET /.well-known/oauth-protected-resource` | RFC 9728 metadata |
+| `GET /authorize` | Authorization Code grant (PKCE S256 only) |
+| `POST /token` | `authorization_code` + `refresh_token` grants |
+
+```bash
+# 1. Generate the four secrets
+openssl rand -hex 32   # → OAUTH_CLIENT_ID
+openssl rand -hex 32   # → OAUTH_CLIENT_SECRET
+openssl rand -hex 32   # → OAUTH_SIGNING_KEY
+
+# 2. Add to .env (OAUTH_ISSUER must match the public URL clients use)
+cat >> .env <<EOF
+OAUTH_ISSUER=https://your-public-mcp-url
+OAUTH_CLIENT_ID=...
+OAUTH_CLIENT_SECRET=...
+OAUTH_SIGNING_KEY=...
+EOF
+
+# 3. Restart
+docker compose up -d
+```
+
+In claude.ai's custom-connector form, paste the **Client ID** and **Client
+Secret** along with the server URL. claude.ai discovers `/authorize` and
+`/token` via the well-known metadata and runs the PKCE flow automatically.
+
+---
+
+## Multi-arch builds (Raspberry Pi, AWS Graviton, …)
+
+The Dockerfile honors BuildKit's `TARGETOS` / `TARGETARCH`, so building on the
+target host produces a binary for the right architecture. For cross-builds
+from a different host, use the dedicated make targets:
+
+```bash
+make docker-build           # builds for the host architecture
+make docker-build-amd64     # explicit linux/amd64
+make docker-build-arm64     # explicit linux/arm64 (Raspberry Pi 4/5 64-bit, Apple Silicon, Graviton)
+make docker-build-multi     # multi-arch manifest, pushed to $(REGISTRY)
+```
+
+Verify the binary inside an image:
+
+```bash
+CID=$(docker create mcp-observability:arm64) && \
+docker cp "$CID:/mcp-server" /tmp/mcp && docker rm "$CID" && file /tmp/mcp
+# /tmp/mcp: ELF 64-bit LSB executable, ARM aarch64, ...
+```
+
+---
+
 ## Kubernetes Deploy
 
 ### Prerequisites
@@ -119,9 +217,20 @@ All credentials are injected via a Kubernetes Secret. The `make k8s-secret` targ
 | `GRAFANA_USERNAME` | ✅* | Basic auth (if no API key) |
 | `GRAFANA_PASSWORD` | ✅* | Basic auth (if no API key) |
 | `GRAFANA_ORG_ID` | ⬜ | Defaults to `1` |
-| `MCP_AUTH_TOKEN` | ⬜ | Bearer token clients must send to this server |
+| `MCP_AUTH_TOKEN` | ⬜ | Static Bearer token clients must send (use OAuth for remote clients like claude.ai) |
+| `HTTP_PORT` | ⬜ | Listen port (default `8080`) |
+| `HTTP_HOST` | ⬜ | Listen address (default `0.0.0.0`) |
+| `LOG_LEVEL` | ⬜ | One of `debug`, `info`, `warn`, `error` (default `info`) |
+| `TLS_CERT_FILE` | ⬜† | PEM cert path (inside the container) — enables HTTPS |
+| `TLS_KEY_FILE` | ⬜† | PEM key path (inside the container) — enables HTTPS |
+| `OAUTH_ISSUER` | ⬜‡ | Public URL clients reach this server at, e.g. `https://mcp.example.com` |
+| `OAUTH_CLIENT_ID` | ⬜‡ | Pre-shared OAuth client id (paste into claude.ai) |
+| `OAUTH_CLIENT_SECRET` | ⬜‡ | Pre-shared OAuth client secret (paste into claude.ai) |
+| `OAUTH_SIGNING_KEY` | ⬜‡ | HMAC secret used to sign access/refresh JWTs |
 
 *At least one Grafana auth method is required.
+†TLS_CERT_FILE and TLS_KEY_FILE must be set together.
+‡All four `OAUTH_*` must be set together; OAuth replaces `MCP_AUTH_TOKEN` when enabled.
 
 ### Grafana Service Account Setup
 

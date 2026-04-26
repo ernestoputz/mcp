@@ -33,6 +33,13 @@ type Config struct {
 
 	// Optional auth for the MCP server itself
 	MCPAuthToken string // MCP_AUTH_TOKEN (Bearer token clients must send)
+
+	// OAuth 2.0 (optional). When OAuthClientID is set, OAuth replaces
+	// the static MCP_AUTH_TOKEN. Required for remote clients like claude.ai.
+	OAuthIssuer       string // OAUTH_ISSUER        (public URL of this server)
+	OAuthClientID     string // OAUTH_CLIENT_ID
+	OAuthClientSecret string // OAUTH_CLIENT_SECRET
+	OAuthSigningKey   string // OAUTH_SIGNING_KEY   (HMAC secret for JWTs)
 }
 
 // LoadConfig reads configuration from environment variables.
@@ -55,6 +62,11 @@ func LoadConfig() (*Config, error) {
 		TLSCertFile:  os.Getenv("TLS_CERT_FILE"),
 		TLSKeyFile:   os.Getenv("TLS_KEY_FILE"),
 		MCPAuthToken: os.Getenv("MCP_AUTH_TOKEN"),
+
+		OAuthIssuer:       os.Getenv("OAUTH_ISSUER"),
+		OAuthClientID:     os.Getenv("OAUTH_CLIENT_ID"),
+		OAuthClientSecret: os.Getenv("OAUTH_CLIENT_SECRET"),
+		OAuthSigningKey:   os.Getenv("OAUTH_SIGNING_KEY"),
 	}
 
 	var errs []string
@@ -70,6 +82,11 @@ func LoadConfig() (*Config, error) {
 	}
 	if (cfg.TLSCertFile == "") != (cfg.TLSKeyFile == "") {
 		errs = append(errs, "TLS_CERT_FILE and TLS_KEY_FILE must be set together")
+	}
+	if cfg.OAuthClientID != "" {
+		if cfg.OAuthIssuer == "" || cfg.OAuthClientSecret == "" || cfg.OAuthSigningKey == "" {
+			errs = append(errs, "OAuth requires all of: OAUTH_ISSUER, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_SIGNING_KEY")
+		}
 	}
 
 	if len(errs) > 0 {

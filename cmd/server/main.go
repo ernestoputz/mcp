@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/your-org/mcp-observability/internal/mcp"
+	"github.com/your-org/mcp-observability/internal/oauth"
 	"github.com/your-org/mcp-observability/internal/transport"
 )
 
@@ -52,8 +53,23 @@ func main() {
 		if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
 			scheme = "https+sse"
 		}
+
+		var oauthSvc *oauth.Service
+		if cfg.OAuthClientID != "" {
+			oauthSvc, err = oauth.New(oauth.Config{
+				Issuer:       cfg.OAuthIssuer,
+				ClientID:     cfg.OAuthClientID,
+				ClientSecret: cfg.OAuthClientSecret,
+				SigningKey:   cfg.OAuthSigningKey,
+			})
+			if err != nil {
+				slog.Error("oauth init failed", "error", err)
+				os.Exit(1)
+			}
+		}
+
 		slog.Info("starting MCP server", "transport", scheme, "addr", addr)
-		if err := transport.RunHTTP(ctx, server, addr, cfg.TLSCertFile, cfg.TLSKeyFile); err != nil {
+		if err := transport.RunHTTP(ctx, server, addr, cfg.TLSCertFile, cfg.TLSKeyFile, oauthSvc); err != nil {
 			slog.Error("http transport error", "error", err)
 			os.Exit(1)
 		}

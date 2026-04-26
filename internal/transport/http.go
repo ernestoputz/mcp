@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/your-org/mcp-observability/internal/mcp"
+	"github.com/your-org/mcp-observability/internal/oauth"
 )
 
 // RunHTTP starts the HTTP + SSE transport.
@@ -23,12 +24,22 @@ import (
 //	POST /mcp/message — SSE message endpoint
 //	GET  /healthz     — liveness probe
 //	GET  /readyz      — readiness probe
-func RunHTTP(ctx context.Context, srv *mcp.Server, addr, certFile, keyFile string) error {
-	h := &httpHandler{srv: srv}
+func RunHTTP(ctx context.Context, srv *mcp.Server, addr, certFile, keyFile string, oauthSvc *oauth.Service) error {
+	h := &httpHandler{srv: srv, oauth: oauthSvc}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/readyz", handleReadyz)
+
+	if oauthSvc != nil {
+		// Public OAuth endpoints — no auth middleware on these.
+		mux.HandleFunc("/.well-known/oauth-authorization-server", oauthSvc.HandleAuthorizationServerMetadata)
+		mux.HandleFunc("/.well-known/oauth-protected-resource", oauthSvc.HandleProtectedResourceMetadata)
+		mux.HandleFunc("/authorize", oauthSvc.HandleAuthorize)
+		mux.HandleFunc("/token", oauthSvc.HandleToken)
+		slog.Info("OAuth 2.0 enabled", "issuer", oauthSvc.Issuer())
+	}
+
 	mux.Handle("/mcp/sse", h.withMiddleware(http.HandlerFunc(h.handleSSE)))
 	mux.Handle("/mcp/message", h.withMiddleware(http.HandlerFunc(h.handleSSEMessage)))
 	mux.Handle("/mcp", h.withMiddleware(http.HandlerFunc(h.routeMCP)))
@@ -65,7 +76,8 @@ func RunHTTP(ctx context.Context, srv *mcp.Server, addr, certFile, keyFile strin
 }
 
 type httpHandler struct {
-	srv *mcp.Server
+	srv   *mcp.Server
+	oauth *oauth.Service // nil when OAuth is disabled
 }
 
 func (h *httpHandler) withMiddleware(next http.Handler) http.Handler {
@@ -138,6 +150,10 @@ func (h *httpHandler) handleSSEMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *httpHandler) authMiddleware(next http.Handler) http.Handler {
+	// OAuth takes precedence when configured; falls back to the static MCP_AUTH_TOKEN.
+	if h.oauth != nil {
+		return h.oauth.Middleware(next)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := h.srv.AuthToken()
 		if token == "" {
