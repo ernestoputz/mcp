@@ -3,7 +3,7 @@ IMAGE_NAME := mcp-observability
 IMAGE_TAG  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 REGISTRY   := your-registry  # ← change this
 
-.PHONY: build run test docker-build docker-push k8s-apply k8s-secret lint tidy
+.PHONY: build run test docker-build docker-build-amd64 docker-build-arm64 docker-build-multi docker-push k8s-apply k8s-secret lint tidy
 
 ## Build local binary
 build:
@@ -25,9 +25,28 @@ lint:
 tidy:
 	go mod tidy
 
-## Build Docker image
+## Build Docker image for the host architecture
 docker-build:
 	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -t $(IMAGE_NAME):latest .
+
+## Build Docker image for linux/amd64 (x86_64 servers, cloud)
+docker-build-amd64:
+	docker buildx build --platform linux/amd64 \
+		-t $(IMAGE_NAME):$(IMAGE_TAG)-amd64 -t $(IMAGE_NAME):amd64 \
+		--load .
+
+## Build Docker image for linux/arm64 (Raspberry Pi 4/5 64-bit, Apple Silicon, AWS Graviton)
+docker-build-arm64:
+	docker buildx build --platform linux/arm64 \
+		-t $(IMAGE_NAME):$(IMAGE_TAG)-arm64 -t $(IMAGE_NAME):arm64 \
+		--load .
+
+## Build a multi-arch manifest (amd64+arm64) and push to $(REGISTRY)
+docker-build-multi:
+	docker buildx build --platform linux/amd64,linux/arm64 \
+		-t $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) \
+		-t $(REGISTRY)/$(IMAGE_NAME):latest \
+		--push .
 
 ## Push to registry
 docker-push: docker-build

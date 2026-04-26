@@ -1,5 +1,10 @@
 # ─── Stage 1: build ──────────────────────────────────────────────────────────
-FROM golang:1.22-alpine AS builder
+# BUILDPLATFORM = host arch (avoids QEMU emulation cost during compile).
+# TARGETOS/TARGETARCH = where the binary will run; populated by BuildKit.
+FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 RUN apk add --no-cache git ca-certificates tzdata
 
@@ -9,9 +14,9 @@ WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 
-# Copy source and build a fully static binary
+# Copy source and cross-compile a fully static binary for the target arch.
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w -extldflags=-static" \
     -o /bin/mcp-server ./cmd/server
 
