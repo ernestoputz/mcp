@@ -149,6 +149,82 @@ Secret** along with the server URL. claude.ai discovers `/authorize` and
 
 ---
 
+## Caddy + Let's Encrypt (Route 53 DNS-01)
+
+For exposing the server publicly with a real (non-self-signed) certificate, run
+the included Caddy reverse proxy. It uses the **DNS-01 challenge** so port 80
+does **not** need to be reachable — useful when ISPs block 80/443 or when the
+firewall only allows non-standard ports like 8443.
+
+### One-time setup
+
+1. Create a Route 53 hosted zone for your domain (or use the existing one).
+   Add an `A` record for the subdomain pointing to the host that will run the
+   stack.
+2. Create an IAM user with the policy below (replace `SUA_ZONE_ID` with the
+   hosted-zone ID from Route 53):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       { "Effect": "Allow",
+         "Action": ["route53:ListHostedZonesByName"],
+         "Resource": "*" },
+       { "Effect": "Allow",
+         "Action": [
+           "route53:GetChange",
+           "route53:ChangeResourceRecordSets",
+           "route53:ListResourceRecordSets"
+         ],
+         "Resource": "arn:aws:route53:::hostedzone/SUA_ZONE_ID" }
+     ]
+   }
+   ```
+
+3. Add to `.env`:
+
+   ```env
+   CADDY_DOMAIN=mcpobservability.example.com
+   CADDY_EMAIL=you@example.com
+   AWS_ACCESS_KEY_ID=AKIA...
+   AWS_SECRET_ACCESS_KEY=...
+   AWS_REGION=us-east-1
+   ```
+
+4. Bring the stack up:
+
+   ```bash
+   make up-caddy
+   make logs-caddy        # watch the cert issuance
+   ```
+
+   First boot takes ~30 s while Caddy provisions the cert. Once you see
+   `certificate obtained successfully` in the logs, hit:
+
+   ```bash
+   curl https://mcpobservability.example.com:8443/healthz
+   ```
+
+### Renewal
+
+Caddy renews the certificate ~30 days before expiry, in the background, using
+the same DNS-01 challenge. **No cron, no restart, no manual intervention.**
+Certs and the ACME account key live in two named volumes (`caddy_data`,
+`caddy_config`) which are listed in `.gitignore`.
+
+### Direct mode vs Caddy mode
+
+| Command | Stack | TLS |
+|---------|-------|-----|
+| `make up` | only `mcp-observability`, publishes `${HTTP_PORT}` | none, or self-signed via `TLS_CERT_FILE` |
+| `make up-caddy` | `mcp-observability` (internal) + `caddy` (publishes 8443) | real Let's Encrypt cert via Route 53 |
+
+Choose by which command you run; the env vars not used by the chosen mode are
+silently ignored.
+
+---
+
 ## Multi-arch builds (Raspberry Pi, AWS Graviton, …)
 
 The Dockerfile honors BuildKit's `TARGETOS` / `TARGETARCH`, so building on the
@@ -227,10 +303,16 @@ All credentials are injected via a Kubernetes Secret. The `make k8s-secret` targ
 | `OAUTH_CLIENT_ID` | ⬜‡ | Pre-shared OAuth client id (paste into claude.ai) |
 | `OAUTH_CLIENT_SECRET` | ⬜‡ | Pre-shared OAuth client secret (paste into claude.ai) |
 | `OAUTH_SIGNING_KEY` | ⬜‡ | HMAC secret used to sign access/refresh JWTs |
+| `CADDY_DOMAIN` | ⬜§ | Public hostname Caddy serves, e.g. `mcpobservability.example.com` |
+| `CADDY_EMAIL` | ⬜§ | Email for Let's Encrypt expiration notices |
+| `AWS_ACCESS_KEY_ID` | ⬜§ | AWS creds for the Route 53 DNS-01 challenge |
+| `AWS_SECRET_ACCESS_KEY` | ⬜§ | (paired with the above) |
+| `AWS_REGION` | ⬜§ | AWS region for the SDK (default `us-east-1`) |
 
 *At least one Grafana auth method is required.
 †TLS_CERT_FILE and TLS_KEY_FILE must be set together.
 ‡All four `OAUTH_*` must be set together; OAuth replaces `MCP_AUTH_TOKEN` when enabled.
+§Only consumed when running with `make up-caddy` (Caddy reverse proxy).
 
 ### Grafana Service Account Setup
 

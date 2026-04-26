@@ -1,0 +1,14 @@
+# Reverse proxy that terminates TLS for the MCP server.
+# Certificates come from Let's Encrypt via the ACME DNS-01 challenge,
+# so port 80 is not required to be reachable.
+
+{
+	email {$CADDY_EMAIL}
+}
+
+{$CADDY_DOMAIN}:8443 {
+	tls {
+		dns route53
+	}
+	reverse_proxy mcp-observability:8080
+}

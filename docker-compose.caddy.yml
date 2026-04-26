@@ -1,0 +1,49 @@
+# Override that fronts mcp-observability with Caddy + Let's Encrypt (Route 53
+# DNS-01). Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+# (or `make up-caddy` for short).
+#
+# In this mode mcp-observability stays on plain HTTP internally and is NOT
+# published to the host — only Caddy listens externally on :8443.
+
+services:
+  mcp-observability:
+    # Drop the host port mapping the base file declares — Caddy is the only
+    # service that should be reachable from outside in this mode.
+    ports: !reset []
+    # Force plain HTTP internally; ignore TLS_CERT_FILE the user might have set
+    # for the direct-TLS mode.
+    environment:
+      HTTP_PORT: "8080"
+      TLS_CERT_FILE: ""
+      TLS_KEY_FILE: ""
+
+  caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    image: mcp-observability-caddy:local
+    ports:
+      - "8443:8443"
+    environment:
+      CADDY_DOMAIN:          ${CADDY_DOMAIN}
+      CADDY_EMAIL:           ${CADDY_EMAIL}
+      AWS_ACCESS_KEY_ID:     ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION:            ${AWS_REGION:-us-east-1}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - mcp-observability
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://localhost:8443"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  caddy_data:
+  caddy_config:

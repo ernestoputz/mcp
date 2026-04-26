@@ -3,7 +3,7 @@ IMAGE_NAME := mcp-observability
 IMAGE_TAG  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 REGISTRY   := your-registry  # ← change this
 
-.PHONY: build run test docker-build docker-build-amd64 docker-build-arm64 docker-build-multi docker-push k8s-apply k8s-secret lint tidy
+.PHONY: build run test docker-build docker-build-amd64 docker-build-arm64 docker-build-multi docker-push k8s-apply k8s-secret lint tidy up down up-caddy down-caddy logs-caddy
 
 ## Build local binary
 build:
@@ -40,6 +40,26 @@ docker-build-arm64:
 	docker buildx build --platform linux/arm64 \
 		-t $(IMAGE_NAME):$(IMAGE_TAG)-arm64 -t $(IMAGE_NAME):arm64 \
 		--load .
+
+## Direct mode: bring the stack up with mcp-observability publishing its own port
+up:
+	docker compose up -d --build
+
+## Direct mode: stop the stack
+down:
+	docker compose down
+
+## Caddy mode: front the server with Caddy + Let's Encrypt (Route 53 DNS-01)
+up-caddy:
+	docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d --build
+
+## Caddy mode: stop the stack
+down-caddy:
+	docker compose -f docker-compose.yml -f docker-compose.caddy.yml down
+
+## Caddy mode: tail Caddy logs (cert issuance + renewal events live here)
+logs-caddy:
+	docker compose -f docker-compose.yml -f docker-compose.caddy.yml logs -f caddy
 
 ## Build a multi-arch manifest (amd64+arm64) and push to $(REGISTRY)
 docker-build-multi:

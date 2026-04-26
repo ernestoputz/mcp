@@ -2,3 +2,5 @@
 .teste.sh
 .DS_Store
 certs
+caddy_data
+caddy_config
