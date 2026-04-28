@@ -225,6 +225,96 @@ silently ignored.
 
 ---
 
+## Connecting Claude Desktop / claude.ai (remote HTTPS)
+
+After the server is running publicly with Caddy + Let's Encrypt and OAuth is
+configured, connect a remote MCP client like this. The flow is the same in
+Claude Desktop and claude.ai — both speak OAuth 2.1 + PKCE.
+
+### 1. Pre-flight checks
+
+```bash
+# Verify the discovery document is reachable
+curl https://mcpobservability.example.com:8443/.well-known/oauth-protected-resource
+
+# Verify the resource itself returns 401 with WWW-Authenticate
+curl -i -X POST https://mcpobservability.example.com:8443/mcp \
+     -H "Content-Type: application/json" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+# Expect: HTTP/1.1 401 Unauthorized
+#         Www-Authenticate: Bearer realm="mcp", resource_metadata="https://.../.well-known/oauth-protected-resource", error="invalid_token"
+```
+
+If either of those fails, fix that first — clients won't be able to connect.
+
+### 2. In claude.ai
+
+1. Open Settings → Connectors → **Add custom connector**.
+2. **Server URL**: `https://mcpobservability.example.com:8443/mcp`
+3. **Client ID** and **Client Secret**: paste the values you set in
+   `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET`.
+4. Save and click **Connect** — claude.ai runs the OAuth flow automatically
+   (calls `/authorize`, gets a code, exchanges it at `/token`, stores the
+   resulting JWT). On success the connector shows the available tools.
+
+### 3. In Claude Desktop
+
+The custom-connector UI lives under Settings → **Connectors** as well. The
+fields are identical. Claude Desktop runs the OAuth flow itself (its own
+redirect callback URL — typically a localhost loopback or a custom URI scheme
+the app registers — both are accepted by this server).
+
+### 4. Verifying it worked
+
+Tail the server logs while you connect:
+
+```bash
+make logs-caddy                            # Caddy access logs
+docker logs -f mcp-mcp-observability-1     # MCP server access + OAuth
+```
+
+You should see, in order:
+1. `GET /.well-known/oauth-protected-resource` → 200
+2. `GET /.well-known/oauth-authorization-server` → 200
+3. `GET /authorize?...` → 302 (redirect with code)
+4. `POST /token` → 200
+5. `POST /mcp` with a valid Bearer token → 200
+
+If the client mentions an "invalid redirect_uri" or any 4xx, the request that
+caused it will be in the logs and you can adjust `redirect_uri` validation or
+investigate from there.
+
+### Important: `OAUTH_ISSUER` must include the port
+
+If you serve on `:8443` (or any non-default port), `OAUTH_ISSUER` **must**
+include it:
+
+```env
+OAUTH_ISSUER=https://mcpobservability.example.com:8443
+```
+
+Omitting the port silently breaks discovery: the metadata documents will
+advertise endpoints at `:443`, the JWT `iss` claim will not match what the
+client sees, and the connector will fail with confusing 401s.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| Caddy logs `unable to get certificate` | AWS creds missing/wrong, or A record not pointing here yet | Check `AWS_ACCESS_KEY_ID`/`SECRET`/`REGION` in `.env`; verify `dig mcp.example.com` resolves to your IP |
+| Client gets 401 with `WWW-Authenticate: Bearer realm="mcp"` | Expected on first call — the client is supposed to follow up with the OAuth flow | Confirm the client supports OAuth 2.1 metadata discovery |
+| `invalid redirect_uri` 400 from `/authorize` | Client sent a `redirect_uri` with a blocked scheme (`javascript:`, `data:`, `file:`, `vbscript:`, `blob:`) | Either change the client, or relax the deny list in `internal/oauth/handlers.go` |
+| `429 rate limit exceeded` for legitimate users | Several users behind the same NAT/proxy share one bucket | Increase `OAUTH_TOKEN_RATE_PER_MINUTE` / `OAUTH_AUTHORIZE_RATE_PER_MINUTE`, or set `OAUTH_TRUSTED_PROXIES` so each user gets their own bucket |
+| `invalid_grant code expired` | Code TTL too short for the round-trip latency | Raise `OAUTH_CODE_TTL` (default `60s`; try `120s`) |
+| `invalid_token` after a few minutes of use | Access token TTL hit | Normal — the client should refresh; if it doesn't, check `OAUTH_REFRESH_TTL` and the client's behavior |
+| `Permission denied` reading cert files at boot | Cert files owned by host user, container runs as nonroot UID 65532 | `chmod 644 certs/*.crt certs/*.key` (self-signed dev) or `chown 65532:65532 certs/*.key && chmod 600 certs/*.key` |
+| `oauth: refusing to start with an http:// issuer` | OAuth configured with HTTP on a non-loopback host | Switch to HTTPS (recommended), or set `OAUTH_ALLOW_INSECURE=true` (dev only) |
+| Connector works but `tools/call` fails with empty results | Prometheus/Grafana not actually reachable from the container | Check `PROMETHEUS_URL` / `GRAFANA_URL` are reachable from inside Docker (`host.docker.internal` on Mac, `--network host` on Linux, or in-cluster DNS) |
+
+---
+
 ## Multi-arch builds (Raspberry Pi, AWS Graviton, …)
 
 The Dockerfile honors BuildKit's `TARGETOS` / `TARGETARCH`, so building on the
@@ -353,8 +443,8 @@ Config file location (platform-specific):
         "--rm",
         "-i",
         "-e", "MCP_TRANSPORT=stdio",
-        "-e", "PROMETHEUS_URL=http:///",
-        "-e", "GRAFANA_URL=http://",
+        "-e", "PROMETHEUS_URL=http://prometheus.example.com:9090",
+        "-e", "GRAFANA_URL=http://grafana.example.com:3000",
         "-e", "GRAFANA_API_KEY=glsa_key_yourgrafanakeyhere",
         "-e", "GRAFANA_ORG_ID=1",
         "-e", "LOG_LEVEL=info",

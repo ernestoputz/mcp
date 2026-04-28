@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -69,8 +70,16 @@ func (s *Service) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := url.Parse(redirectURI)
-	if err != nil || (u.Scheme != "https" && u.Host != "localhost" && u.Scheme != "http") {
+	if err != nil || u.Scheme == "" {
 		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+		return
+	}
+	// Allow https://, http://, and custom URI schemes for native apps
+	// (Claude Desktop, etc.). Block only schemes that can execute code or
+	// read local files in a victim's browser.
+	switch strings.ToLower(u.Scheme) {
+	case "javascript", "data", "file", "vbscript", "blob":
+		http.Error(w, "invalid redirect_uri scheme", http.StatusBadRequest)
 		return
 	}
 	if challenge == "" || method != "S256" {
