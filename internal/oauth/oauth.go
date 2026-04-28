@@ -52,10 +52,17 @@ type Config struct {
 	TrustedProxies []string
 }
 
+// registeredClient holds credentials for a dynamically registered OAuth client (RFC 7591).
+type registeredClient struct {
+	Secret       string // empty = public client (PKCE-only, no secret required)
+	RedirectURIs []string
+}
+
 // Service implements the OAuth endpoints and bearer-token middleware.
 type Service struct {
 	cfg              Config
 	codes            sync.Map // string code → *authCode
+	clients          sync.Map // string clientID → *registeredClient (dynamic registrations)
 	tokenLimiter     *rateLimiter
 	authorizeLimiter *rateLimiter
 	trustedProxies   []*net.IPNet
@@ -266,6 +273,20 @@ func randID(n int) (string, error) {
 		return "", err
 	}
 	return b64(b), nil
+}
+
+// lookupClient resolves a client_id to its secret and registered redirect URIs.
+// It checks dynamic registrations first, then falls back to the static config.
+// Returns (secret, redirectURIs, found). An empty secret means a public client.
+func (s *Service) lookupClient(clientID string) (secret string, redirectURIs []string, found bool) {
+	if v, ok := s.clients.Load(clientID); ok {
+		rc := v.(*registeredClient)
+		return rc.Secret, rc.RedirectURIs, true
+	}
+	if subtle.ConstantTimeCompare([]byte(clientID), []byte(s.cfg.ClientID)) == 1 {
+		return s.cfg.ClientSecret, nil, true
+	}
+	return "", nil, false
 }
 
 // ─── Middleware ──────────────────────────────────────────────────────────────

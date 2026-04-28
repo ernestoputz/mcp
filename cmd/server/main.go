@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -17,6 +18,17 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "health" {
+		port := os.Getenv("HTTP_PORT")
+		if port == "" {
+			port = "8080"
+		}
+		resp, err := http.Get("http://localhost:" + port + "/healthz")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	// Logs must go to stderr — stdout is reserved for the stdio JSON-RPC channel.
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slogLevel(),

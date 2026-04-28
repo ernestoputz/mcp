@@ -35,8 +35,7 @@ services:
       # Mount your certs into /certs (read-only). Leave empty to skip TLS.
       - ./certs:/certs:ro
     healthcheck:
-      # Switches between http and https based on TLS_CERT_FILE.
-      test: ["CMD-SHELL", "wget --no-check-certificate -qO- ${TLS_CERT_FILE:+https}${TLS_CERT_FILE:-http}://localhost:${HTTP_PORT:-8080}/healthz || exit 1"]
+      test: ["CMD", "/mcp-server", "health"]
       interval: 15s
       timeout: 5s
       retries: 3

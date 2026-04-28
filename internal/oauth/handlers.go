@@ -20,12 +20,65 @@ func (s *Service) HandleAuthorizationServerMetadata(w http.ResponseWriter, _ *ht
 		"issuer":                                s.cfg.Issuer,
 		"authorization_endpoint":                s.cfg.Issuer + "/authorize",
 		"token_endpoint":                        s.cfg.Issuer + "/token",
+		"registration_endpoint":                 s.cfg.Issuer + "/register",
 		"response_types_supported":              []string{"code"},
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
 		"code_challenge_methods_supported":      []string{"S256"},
-		"token_endpoint_auth_methods_supported": []string{"client_secret_post", "client_secret_basic"},
+		"token_endpoint_auth_methods_supported": []string{"client_secret_post", "client_secret_basic", "none"},
 		"scopes_supported":                      []string{"mcp"},
 	})
+}
+
+// HandleRegister implements RFC 7591 dynamic client registration.
+// Clients receive a generated client_id (and optional client_secret for
+// confidential clients). Public clients omit the secret and rely on PKCE.
+func (s *Service) HandleRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ClientName              string   `json:"client_name"`
+		RedirectURIs            []string `json:"redirect_uris"`
+		GrantTypes              []string `json:"grant_types"`
+		TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "malformed JSON body")
+		return
+	}
+	clientID, err := randID(16)
+	if err != nil {
+		http.Error(w, "internal", http.StatusInternalServerError)
+		return
+	}
+	// Public clients (token_endpoint_auth_method == "none") don't get a secret.
+	var clientSecret string
+	if req.TokenEndpointAuthMethod != "none" {
+		if clientSecret, err = randID(32); err != nil {
+			http.Error(w, "internal", http.StatusInternalServerError)
+			return
+		}
+	}
+	s.clients.Store(clientID, &registeredClient{
+		Secret:       clientSecret,
+		RedirectURIs: req.RedirectURIs,
+	})
+	grantTypes := req.GrantTypes
+	if len(grantTypes) == 0 {
+		grantTypes = []string{"authorization_code"}
+	}
+	resp := map[string]any{
+		"client_id":    clientID,
+		"redirect_uris": req.RedirectURIs,
+		"grant_types":  grantTypes,
+		"response_types": []string{"code"},
+		"token_endpoint_auth_method": req.TokenEndpointAuthMethod,
+	}
+	if clientSecret != "" {
+		resp["client_secret"] = clientSecret
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // HandleProtectedResourceMetadata serves /.well-known/oauth-protected-resource (RFC 9728).
@@ -61,7 +114,8 @@ func (s *Service) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unsupported_response_type", http.StatusBadRequest)
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(clientID), []byte(s.cfg.ClientID)) != 1 {
+	_, _, clientFound := s.lookupClient(clientID)
+	if !clientFound {
 		http.Error(w, "invalid_client", http.StatusBadRequest)
 		return
 	}
@@ -137,8 +191,15 @@ func (s *Service) HandleToken(w http.ResponseWriter, r *http.Request) {
 	if cid, csec, ok := r.BasicAuth(); ok {
 		clientID, clientSecret = cid, csec
 	}
-	if subtle.ConstantTimeCompare([]byte(clientID), []byte(s.cfg.ClientID)) != 1 ||
-		subtle.ConstantTimeCompare([]byte(clientSecret), []byte(s.cfg.ClientSecret)) != 1 {
+	expectedSecret, _, clientFound := s.lookupClient(clientID)
+	if !clientFound {
+		s.tokenLimiter.Fail(ip)
+		w.Header().Set("WWW-Authenticate", `Basic realm="mcp"`)
+		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "")
+		return
+	}
+	// Public clients (empty secret) rely on PKCE; skip secret verification.
+	if expectedSecret != "" && subtle.ConstantTimeCompare([]byte(clientSecret), []byte(expectedSecret)) != 1 {
 		s.tokenLimiter.Fail(ip)
 		w.Header().Set("WWW-Authenticate", `Basic realm="mcp"`)
 		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "")

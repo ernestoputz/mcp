@@ -32,3 +32,5 @@ USER nonroot:nonroot
 EXPOSE 8080
 
 ENTRYPOINT ["/mcp-server"]
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD ["/mcp-server", "health"]

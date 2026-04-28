@@ -38,6 +38,7 @@ func RunHTTP(ctx context.Context, srv *mcp.Server, addr, certFile, keyFile strin
 		mux.HandleFunc("/.well-known/oauth-protected-resource", oauthSvc.HandleProtectedResourceMetadata)
 		mux.HandleFunc("/authorize", oauthSvc.HandleAuthorize)
 		mux.HandleFunc("/token", oauthSvc.HandleToken)
+		mux.HandleFunc("/register", oauthSvc.HandleRegister)
 		slog.Info("OAuth 2.0 enabled", "issuer", oauthSvc.Issuer())
 	}
 
