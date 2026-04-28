@@ -9,6 +9,11 @@
 {$CADDY_DOMAIN}:8443 {
 	tls {
 		dns route53
+		# Wait for the TXT record to propagate before asking Let's Encrypt to
+		# validate. Route 53 propagates fast, but LE queries from multiple
+		# resolvers and a stale negative cache can produce false NXDOMAIN.
+		propagation_delay 60s
+		propagation_timeout 5m
 	}
 	reverse_proxy mcp-observability:8080
 }
