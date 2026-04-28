@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/your-org/mcp-observability/internal/mcp"
 	"github.com/your-org/mcp-observability/internal/oauth"
@@ -56,11 +57,30 @@ func main() {
 
 		var oauthSvc *oauth.Service
 		if cfg.OAuthClientID != "" {
+			accessTTL, err := parseDurationOpt(cfg.OAuthAccessTTL, "OAUTH_ACCESS_TTL")
+			if err != nil {
+				slog.Error("oauth init failed", "error", err)
+				os.Exit(1)
+			}
+			refreshTTL, err := parseDurationOpt(cfg.OAuthRefreshTTL, "OAUTH_REFRESH_TTL")
+			if err != nil {
+				slog.Error("oauth init failed", "error", err)
+				os.Exit(1)
+			}
+			codeTTL, err := parseDurationOpt(cfg.OAuthCodeTTL, "OAUTH_CODE_TTL")
+			if err != nil {
+				slog.Error("oauth init failed", "error", err)
+				os.Exit(1)
+			}
 			oauthSvc, err = oauth.New(oauth.Config{
-				Issuer:       cfg.OAuthIssuer,
-				ClientID:     cfg.OAuthClientID,
-				ClientSecret: cfg.OAuthClientSecret,
-				SigningKey:   cfg.OAuthSigningKey,
+				Issuer:        cfg.OAuthIssuer,
+				ClientID:      cfg.OAuthClientID,
+				ClientSecret:  cfg.OAuthClientSecret,
+				SigningKey:    cfg.OAuthSigningKey,
+				AccessTTL:     accessTTL,
+				RefreshTTL:    refreshTTL,
+				CodeTTL:       codeTTL,
+				AllowInsecure: cfg.OAuthAllowInsecure,
 			})
 			if err != nil {
 				slog.Error("oauth init failed", "error", err)
@@ -77,6 +97,18 @@ func main() {
 		slog.Error("unknown transport mode", "mode", mode, "valid", []string{"stdio", "http"})
 		os.Exit(1)
 	}
+}
+
+// parseDurationOpt parses a duration string, returning 0 (oauth defaults) if empty.
+func parseDurationOpt(s, name string) (time.Duration, error) {
+	if s == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s %q: %w", name, s, err)
+	}
+	return d, nil
 }
 
 func slogLevel() slog.Level {

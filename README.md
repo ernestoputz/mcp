@@ -303,6 +303,10 @@ All credentials are injected via a Kubernetes Secret. The `make k8s-secret` targ
 | `OAUTH_CLIENT_ID` | ⬜‡ | Pre-shared OAuth client id (paste into claude.ai) |
 | `OAUTH_CLIENT_SECRET` | ⬜‡ | Pre-shared OAuth client secret (paste into claude.ai) |
 | `OAUTH_SIGNING_KEY` | ⬜‡ | HMAC secret used to sign access/refresh JWTs |
+| `OAUTH_ACCESS_TTL` | ⬜ | Access token lifetime (Go duration; default `1h`) |
+| `OAUTH_REFRESH_TTL` | ⬜ | Refresh token lifetime (default `720h` = 30d) |
+| `OAUTH_CODE_TTL` | ⬜ | Authorization code lifetime (default `60s`) |
+| `OAUTH_ALLOW_INSECURE` | ⬜ | Set `true` to allow `http://` issuer on non-loopback (dev only) |
 | `CADDY_DOMAIN` | ⬜§ | Public hostname Caddy serves, e.g. `mcpobservability.example.com` |
 | `CADDY_EMAIL` | ⬜§ | Email for Let's Encrypt expiration notices |
 | `AWS_ACCESS_KEY_ID` | ⬜§ | AWS creds for the Route 53 DNS-01 challenge |

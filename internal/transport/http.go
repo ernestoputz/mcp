@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -171,11 +172,40 @@ func (h *httpHandler) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// sensitiveQueryParams are query keys whose values must never appear in logs.
+// `code` and `state` flow through /authorize redirects; `access_token` and
+// `refresh_token` would appear if anyone (mistakenly) put them in the query
+// string instead of the body.
+var sensitiveQueryParams = map[string]struct{}{
+	"code":          {},
+	"state":         {},
+	"access_token":  {},
+	"refresh_token": {},
+	"client_secret": {},
+	"code_verifier": {},
+}
+
+// redactQuery returns the query string with any sensitive values replaced by
+// "REDACTED". Use this — never RawQuery — when including a URL in a log.
+func redactQuery(q url.Values) string {
+	out := make(url.Values, len(q))
+	for k, vs := range q {
+		if _, secret := sensitiveQueryParams[k]; secret {
+			out[k] = []string{"REDACTED"}
+			continue
+		}
+		out[k] = vs
+	}
+	return out.Encode()
+}
+
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		ww := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(ww, r)
+		// IMPORTANT: never log r.URL.RawQuery directly — it can contain auth
+		// codes, tokens, or PKCE verifiers. Use redactQuery if you need it.
 		slog.Info("request",
 			"method", r.Method,
 			"path", r.URL.Path,

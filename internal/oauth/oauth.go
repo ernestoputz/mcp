@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -32,12 +33,18 @@ type Config struct {
 	AccessTTL    time.Duration
 	RefreshTTL   time.Duration
 	CodeTTL      time.Duration
+
+	// AllowInsecure permits an `http://` issuer for non-loopback hosts. Off by
+	// default — exposing OAuth over plain HTTP leaks every credential and JWT.
+	AllowInsecure bool
 }
 
 // Service implements the OAuth endpoints and bearer-token middleware.
 type Service struct {
-	cfg   Config
-	codes sync.Map // string code → *authCode
+	cfg              Config
+	codes            sync.Map // string code → *authCode
+	tokenLimiter     *rateLimiter
+	authorizeLimiter *rateLimiter
 }
 
 type authCode struct {
@@ -68,6 +75,16 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Issuer == "" {
 		return nil, errors.New("oauth: OAUTH_ISSUER is required (public URL of this server)")
 	}
+	issuerURL, err := url.Parse(cfg.Issuer)
+	if err != nil || issuerURL.Host == "" {
+		return nil, fmt.Errorf("oauth: invalid OAUTH_ISSUER %q", cfg.Issuer)
+	}
+	if issuerURL.Scheme == "http" && !isLoopback(issuerURL.Hostname()) && !cfg.AllowInsecure {
+		return nil, errors.New("oauth: refusing to start with an http:// issuer on a non-loopback host. " +
+			"OAuth over plain HTTP leaks every credential and JWT in transit. " +
+			"Use https:// (terminate TLS in mcp-observability or with a reverse proxy like Caddy), " +
+			"or set OAUTH_ALLOW_INSECURE=true if you really know what you are doing.")
+	}
 	if cfg.ClientID == "" || cfg.ClientSecret == "" {
 		return nil, errors.New("oauth: OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET are required")
 	}
@@ -81,11 +98,19 @@ func New(cfg Config) (*Service, error) {
 		cfg.RefreshTTL = 30 * 24 * time.Hour
 	}
 	if cfg.CodeTTL == 0 {
-		cfg.CodeTTL = 10 * time.Minute
+		cfg.CodeTTL = 60 * time.Second
 	}
-	s := &Service{cfg: cfg}
+	s := &Service{
+		cfg:              cfg,
+		tokenLimiter:     newRateLimiter(5, 10, 10*time.Minute),  // 5 req/min, block 10min after 10 fails
+		authorizeLimiter: newRateLimiter(30, 30, 10*time.Minute), // 30 req/min, more permissive (PKCE protects)
+	}
 	go s.gcLoop()
 	return s, nil
+}
+
+func isLoopback(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
 }
 
 // Issuer returns the configured public base URL (no trailing slash).

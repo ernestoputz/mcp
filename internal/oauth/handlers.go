@@ -5,8 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
+
+// Maximum body size accepted on /token. Real OAuth requests are well under 1KB;
+// 4KB is generous and bounds memory if someone tries a body bomb.
+const maxTokenBodyBytes = 4 * 1024
 
 // HandleAuthorizationServerMetadata serves /.well-known/oauth-authorization-server (RFC 8414).
 func (s *Service) HandleAuthorizationServerMetadata(w http.ResponseWriter, _ *http.Request) {
@@ -36,6 +41,12 @@ func (s *Service) HandleProtectedResourceMetadata(w http.ResponseWriter, _ *http
 // Validates client_id, PKCE challenge and redirect_uri, mints a one-shot code,
 // and 302-redirects back to redirect_uri with ?code=&state=.
 func (s *Service) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+	if ok, retry := s.authorizeLimiter.Allow(ip); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
 	q := r.URL.Query()
 	clientID := q.Get("client_id")
 	redirectURI := q.Get("redirect_uri")
@@ -98,8 +109,18 @@ func (s *Service) HandleToken(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusMethodNotAllowed, "invalid_request", "POST required")
 		return
 	}
+
+	ip := clientIP(r)
+	if ok, retry := s.tokenLimiter.Allow(ip); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+
+	// Bound the request body so a large payload cannot exhaust memory in ParseForm.
+	r.Body = http.MaxBytesReader(w, r.Body, maxTokenBodyBytes)
 	if err := r.ParseForm(); err != nil {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "request body too large or malformed")
 		return
 	}
 
@@ -109,6 +130,7 @@ func (s *Service) HandleToken(w http.ResponseWriter, r *http.Request) {
 	}
 	if subtle.ConstantTimeCompare([]byte(clientID), []byte(s.cfg.ClientID)) != 1 ||
 		subtle.ConstantTimeCompare([]byte(clientSecret), []byte(s.cfg.ClientSecret)) != 1 {
+		s.tokenLimiter.Fail(ip)
 		w.Header().Set("WWW-Authenticate", `Basic realm="mcp"`)
 		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "")
 		return
@@ -116,21 +138,22 @@ func (s *Service) HandleToken(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Form.Get("grant_type") {
 	case "authorization_code":
-		s.handleAuthCodeGrant(w, r)
+		s.handleAuthCodeGrant(w, r, ip)
 	case "refresh_token":
-		s.handleRefreshGrant(w, r)
+		s.handleRefreshGrant(w, r, ip)
 	default:
 		writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", r.Form.Get("grant_type"))
 	}
 }
 
-func (s *Service) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, ip string) {
 	code := r.Form.Get("code")
 	verifier := r.Form.Get("code_verifier")
 	redirectURI := r.Form.Get("redirect_uri")
 
 	v, ok := s.codes.LoadAndDelete(code)
 	if !ok {
+		s.tokenLimiter.Fail(ip)
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "code not found or already used")
 		return
 	}
@@ -140,23 +163,28 @@ func (s *Service) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if redirectURI != "" && redirectURI != ac.RedirectURI {
+		s.tokenLimiter.Fail(ip)
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "redirect_uri mismatch")
 		return
 	}
 	if !verifyPKCE(verifier, ac.Challenge, ac.Method) {
+		s.tokenLimiter.Fail(ip)
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "PKCE verification failed")
 		return
 	}
+	s.tokenLimiter.Success(ip)
 	s.issueTokens(w, ac.Scope)
 }
 
-func (s *Service) handleRefreshGrant(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleRefreshGrant(w http.ResponseWriter, r *http.Request, ip string) {
 	rt := r.Form.Get("refresh_token")
 	claims, err := s.parseJWT(rt)
 	if err != nil || claims.TokenUse != "refresh" {
+		s.tokenLimiter.Fail(ip)
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "invalid refresh token")
 		return
 	}
+	s.tokenLimiter.Success(ip)
 	s.issueTokens(w, claims.Scope)
 }
 

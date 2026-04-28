@@ -36,10 +36,14 @@ type Config struct {
 
 	// OAuth 2.0 (optional). When OAuthClientID is set, OAuth replaces
 	// the static MCP_AUTH_TOKEN. Required for remote clients like claude.ai.
-	OAuthIssuer       string // OAUTH_ISSUER        (public URL of this server)
-	OAuthClientID     string // OAUTH_CLIENT_ID
-	OAuthClientSecret string // OAUTH_CLIENT_SECRET
-	OAuthSigningKey   string // OAUTH_SIGNING_KEY   (HMAC secret for JWTs)
+	OAuthIssuer        string // OAUTH_ISSUER         (public URL of this server)
+	OAuthClientID      string // OAUTH_CLIENT_ID
+	OAuthClientSecret  string // OAUTH_CLIENT_SECRET
+	OAuthSigningKey    string // OAUTH_SIGNING_KEY    (HMAC secret for JWTs)
+	OAuthAccessTTL     string // OAUTH_ACCESS_TTL     (e.g. "1h", "15m"; default 1h)
+	OAuthRefreshTTL    string // OAUTH_REFRESH_TTL    (default 720h = 30d)
+	OAuthCodeTTL       string // OAUTH_CODE_TTL       (default 60s)
+	OAuthAllowInsecure bool   // OAUTH_ALLOW_INSECURE (default false; permits http:// issuer)
 }
 
 // LoadConfig reads configuration from environment variables.
@@ -63,10 +67,14 @@ func LoadConfig() (*Config, error) {
 		TLSKeyFile:   os.Getenv("TLS_KEY_FILE"),
 		MCPAuthToken: os.Getenv("MCP_AUTH_TOKEN"),
 
-		OAuthIssuer:       os.Getenv("OAUTH_ISSUER"),
-		OAuthClientID:     os.Getenv("OAUTH_CLIENT_ID"),
-		OAuthClientSecret: os.Getenv("OAUTH_CLIENT_SECRET"),
-		OAuthSigningKey:   os.Getenv("OAUTH_SIGNING_KEY"),
+		OAuthIssuer:        os.Getenv("OAUTH_ISSUER"),
+		OAuthClientID:      os.Getenv("OAUTH_CLIENT_ID"),
+		OAuthClientSecret:  os.Getenv("OAUTH_CLIENT_SECRET"),
+		OAuthSigningKey:    os.Getenv("OAUTH_SIGNING_KEY"),
+		OAuthAccessTTL:     os.Getenv("OAUTH_ACCESS_TTL"),
+		OAuthRefreshTTL:    os.Getenv("OAUTH_REFRESH_TTL"),
+		OAuthCodeTTL:       os.Getenv("OAUTH_CODE_TTL"),
+		OAuthAllowInsecure: os.Getenv("OAUTH_ALLOW_INSECURE") == "true",
 	}
 
 	var errs []string
