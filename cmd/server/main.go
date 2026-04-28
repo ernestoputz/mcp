@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -72,15 +74,48 @@ func main() {
 				slog.Error("oauth init failed", "error", err)
 				os.Exit(1)
 			}
+			tokenRate, err := parseIntOpt(cfg.OAuthTokenRatePerMinute, "OAUTH_TOKEN_RATE_PER_MINUTE")
+			if err != nil {
+				slog.Error("oauth init failed", "error", err)
+				os.Exit(1)
+			}
+			authzRate, err := parseIntOpt(cfg.OAuthAuthorizeRatePerMinute, "OAUTH_AUTHORIZE_RATE_PER_MINUTE")
+			if err != nil {
+				slog.Error("oauth init failed", "error", err)
+				os.Exit(1)
+			}
+			failLimit, err := parseIntOpt(cfg.OAuthFailLimit, "OAUTH_FAIL_LIMIT")
+			if err != nil {
+				slog.Error("oauth init failed", "error", err)
+				os.Exit(1)
+			}
+			failBlock, err := parseDurationOpt(cfg.OAuthFailBlockDuration, "OAUTH_FAIL_BLOCK_DURATION")
+			if err != nil {
+				slog.Error("oauth init failed", "error", err)
+				os.Exit(1)
+			}
+			var trustedProxies []string
+			if cfg.OAuthTrustedProxies != "" {
+				for _, p := range strings.Split(cfg.OAuthTrustedProxies, ",") {
+					if p = strings.TrimSpace(p); p != "" {
+						trustedProxies = append(trustedProxies, p)
+					}
+				}
+			}
 			oauthSvc, err = oauth.New(oauth.Config{
-				Issuer:        cfg.OAuthIssuer,
-				ClientID:      cfg.OAuthClientID,
-				ClientSecret:  cfg.OAuthClientSecret,
-				SigningKey:    cfg.OAuthSigningKey,
-				AccessTTL:     accessTTL,
-				RefreshTTL:    refreshTTL,
-				CodeTTL:       codeTTL,
-				AllowInsecure: cfg.OAuthAllowInsecure,
+				Issuer:                 cfg.OAuthIssuer,
+				ClientID:               cfg.OAuthClientID,
+				ClientSecret:           cfg.OAuthClientSecret,
+				SigningKey:             cfg.OAuthSigningKey,
+				AccessTTL:              accessTTL,
+				RefreshTTL:             refreshTTL,
+				CodeTTL:                codeTTL,
+				AllowInsecure:          cfg.OAuthAllowInsecure,
+				TokenRatePerMinute:     tokenRate,
+				AuthorizeRatePerMinute: authzRate,
+				FailLimit:              failLimit,
+				FailBlockDuration:      failBlock,
+				TrustedProxies:         trustedProxies,
 			})
 			if err != nil {
 				slog.Error("oauth init failed", "error", err)
@@ -109,6 +144,18 @@ func parseDurationOpt(s, name string) (time.Duration, error) {
 		return 0, fmt.Errorf("invalid %s %q: %w", name, s, err)
 	}
 	return d, nil
+}
+
+// parseIntOpt parses an int, returning 0 (oauth defaults) if empty.
+func parseIntOpt(s, name string) (int, error) {
+	if s == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s %q: %w", name, s, err)
+	}
+	return n, nil
 }
 
 func slogLevel() slog.Level {

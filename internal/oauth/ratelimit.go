@@ -3,6 +3,7 @@ package oauth
 import (
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -118,15 +119,57 @@ func (r *rateLimiter) Success(key string) {
 	}
 }
 
-// clientIP returns the request's source address. We deliberately use
-// RemoteAddr only (and not X-Forwarded-For) so an attacker cannot bypass the
-// limiter by spoofing the header. In Caddy mode all external traffic shares
-// Caddy's container IP — that's a coarser bucket but still kills brute-force
-// attempts at the cost of mixing legitimate concurrent users together.
-func clientIP(r *http.Request) string {
+// privateRanges are RFC1918 + loopback CIDRs trusted by default to set
+// X-Forwarded-For. Anything originating from these ranges is presumed to be
+// a sibling reverse proxy (Caddy on the Docker bridge, for example).
+var privateRanges = mustCIDRs(
+	"127.0.0.0/8",     // IPv4 loopback
+	"10.0.0.0/8",      // RFC1918
+	"172.16.0.0/12",   // RFC1918
+	"192.168.0.0/16",  // RFC1918
+	"::1/128",         // IPv6 loopback
+	"fc00::/7",        // IPv6 unique local
+)
+
+func mustCIDRs(items ...string) []*net.IPNet {
+	out := make([]*net.IPNet, 0, len(items))
+	for _, s := range items {
+		_, cidr, err := net.ParseCIDR(s)
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, cidr)
+	}
+	return out
+}
+
+func ipInRanges(ip net.IP, ranges []*net.IPNet) bool {
+	for _, c := range ranges {
+		if c.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// clientIP returns the request's source address. If the immediate sender is
+// in a trusted range (private ranges by default, plus extraTrusted), the
+// leftmost X-Forwarded-For value is used; otherwise the header is ignored
+// to prevent spoofing by direct callers.
+func clientIP(r *http.Request, extraTrusted []*net.IPNet) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && (ipInRanges(ip, privateRanges) || ipInRanges(ip, extraTrusted)) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			real := strings.TrimSpace(parts[0])
+			if real != "" {
+				return real
+			}
+		}
 	}
 	return host
 }

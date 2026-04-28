@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -37,6 +38,18 @@ type Config struct {
 	// AllowInsecure permits an `http://` issuer for non-loopback hosts. Off by
 	// default — exposing OAuth over plain HTTP leaks every credential and JWT.
 	AllowInsecure bool
+
+	// Rate limiting (zero means use defaults).
+	TokenRatePerMinute     int
+	AuthorizeRatePerMinute int
+	FailLimit              int
+	FailBlockDuration      time.Duration
+
+	// TrustedProxies lists IPs whose X-Forwarded-For header may be trusted to
+	// determine the real client IP. Private RFC1918 + loopback ranges are
+	// trusted automatically (Docker bridge case). Use this only for unusual
+	// network topologies where the proxy sits on a public IP.
+	TrustedProxies []string
 }
 
 // Service implements the OAuth endpoints and bearer-token middleware.
@@ -45,6 +58,7 @@ type Service struct {
 	codes            sync.Map // string code → *authCode
 	tokenLimiter     *rateLimiter
 	authorizeLimiter *rateLimiter
+	trustedProxies   []*net.IPNet
 }
 
 type authCode struct {
@@ -100,10 +114,27 @@ func New(cfg Config) (*Service, error) {
 	if cfg.CodeTTL == 0 {
 		cfg.CodeTTL = 60 * time.Second
 	}
+	if cfg.TokenRatePerMinute == 0 {
+		cfg.TokenRatePerMinute = 5
+	}
+	if cfg.AuthorizeRatePerMinute == 0 {
+		cfg.AuthorizeRatePerMinute = 30
+	}
+	if cfg.FailLimit == 0 {
+		cfg.FailLimit = 10
+	}
+	if cfg.FailBlockDuration == 0 {
+		cfg.FailBlockDuration = 10 * time.Minute
+	}
+	trusted, err := parseTrustedProxies(cfg.TrustedProxies)
+	if err != nil {
+		return nil, fmt.Errorf("oauth: invalid OAUTH_TRUSTED_PROXIES: %w", err)
+	}
 	s := &Service{
 		cfg:              cfg,
-		tokenLimiter:     newRateLimiter(5, 10, 10*time.Minute),  // 5 req/min, block 10min after 10 fails
-		authorizeLimiter: newRateLimiter(30, 30, 10*time.Minute), // 30 req/min, more permissive (PKCE protects)
+		trustedProxies:   trusted,
+		tokenLimiter:     newRateLimiter(cfg.TokenRatePerMinute, cfg.FailLimit, cfg.FailBlockDuration),
+		authorizeLimiter: newRateLimiter(cfg.AuthorizeRatePerMinute, cfg.FailLimit, cfg.FailBlockDuration),
 	}
 	go s.gcLoop()
 	return s, nil
@@ -111,6 +142,33 @@ func New(cfg Config) (*Service, error) {
 
 func isLoopback(host string) bool {
 	return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
+}
+
+// parseTrustedProxies converts a list of IPs/CIDRs into IPNet structures.
+// Bare IPs are normalized to /32 (IPv4) or /128 (IPv6).
+func parseTrustedProxies(items []string) ([]*net.IPNet, error) {
+	out := make([]*net.IPNet, 0, len(items))
+	for _, raw := range items {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if !strings.Contains(raw, "/") {
+			if ip := net.ParseIP(raw); ip != nil {
+				if ip.To4() != nil {
+					raw += "/32"
+				} else {
+					raw += "/128"
+				}
+			}
+		}
+		_, cidr, err := net.ParseCIDR(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a valid IP or CIDR", raw)
+		}
+		out = append(out, cidr)
+	}
+	return out, nil
 }
 
 // Issuer returns the configured public base URL (no trailing slash).

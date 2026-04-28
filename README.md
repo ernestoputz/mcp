@@ -307,6 +307,11 @@ All credentials are injected via a Kubernetes Secret. The `make k8s-secret` targ
 | `OAUTH_REFRESH_TTL` | ⬜ | Refresh token lifetime (default `720h` = 30d) |
 | `OAUTH_CODE_TTL` | ⬜ | Authorization code lifetime (default `60s`) |
 | `OAUTH_ALLOW_INSECURE` | ⬜ | Set `true` to allow `http://` issuer on non-loopback (dev only) |
+| `OAUTH_TOKEN_RATE_PER_MINUTE` | ⬜ | Per-IP rate limit on `/token` (default `5`) |
+| `OAUTH_AUTHORIZE_RATE_PER_MINUTE` | ⬜ | Per-IP rate limit on `/authorize` (default `30`) |
+| `OAUTH_FAIL_LIMIT` | ⬜ | Consecutive auth failures before IP block (default `10`) |
+| `OAUTH_FAIL_BLOCK_DURATION` | ⬜ | Hard-block duration after fail limit (default `10m`) |
+| `OAUTH_TRUSTED_PROXIES` | ⬜ | Comma-separated IPs/CIDRs whose `X-Forwarded-For` is trusted (RFC1918 trusted automatically) |
 | `CADDY_DOMAIN` | ⬜§ | Public hostname Caddy serves, e.g. `mcpobservability.example.com` |
 | `CADDY_EMAIL` | ⬜§ | Email for Let's Encrypt expiration notices |
 | `AWS_ACCESS_KEY_ID` | ⬜§ | AWS creds for the Route 53 DNS-01 challenge |

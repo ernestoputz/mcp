@@ -44,6 +44,13 @@ type Config struct {
 	OAuthRefreshTTL    string // OAUTH_REFRESH_TTL    (default 720h = 30d)
 	OAuthCodeTTL       string // OAUTH_CODE_TTL       (default 60s)
 	OAuthAllowInsecure bool   // OAUTH_ALLOW_INSECURE (default false; permits http:// issuer)
+
+	// Rate limiting. Empty/zero = use library defaults (5/30/10/10m).
+	OAuthTokenRatePerMinute     string // OAUTH_TOKEN_RATE_PER_MINUTE     (default 5)
+	OAuthAuthorizeRatePerMinute string // OAUTH_AUTHORIZE_RATE_PER_MINUTE (default 30)
+	OAuthFailLimit              string // OAUTH_FAIL_LIMIT                (consecutive fails before block; default 10)
+	OAuthFailBlockDuration      string // OAUTH_FAIL_BLOCK_DURATION       (Go duration; default 10m)
+	OAuthTrustedProxies         string // OAUTH_TRUSTED_PROXIES           (comma-separated IPs/CIDRs)
 }
 
 // LoadConfig reads configuration from environment variables.
@@ -75,6 +82,12 @@ func LoadConfig() (*Config, error) {
 		OAuthRefreshTTL:    os.Getenv("OAUTH_REFRESH_TTL"),
 		OAuthCodeTTL:       os.Getenv("OAUTH_CODE_TTL"),
 		OAuthAllowInsecure: os.Getenv("OAUTH_ALLOW_INSECURE") == "true",
+
+		OAuthTokenRatePerMinute:     os.Getenv("OAUTH_TOKEN_RATE_PER_MINUTE"),
+		OAuthAuthorizeRatePerMinute: os.Getenv("OAUTH_AUTHORIZE_RATE_PER_MINUTE"),
+		OAuthFailLimit:              os.Getenv("OAUTH_FAIL_LIMIT"),
+		OAuthFailBlockDuration:      os.Getenv("OAUTH_FAIL_BLOCK_DURATION"),
+		OAuthTrustedProxies:         os.Getenv("OAUTH_TRUSTED_PROXIES"),
 	}
 
 	var errs []string

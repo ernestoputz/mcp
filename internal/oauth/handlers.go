@@ -41,7 +41,7 @@ func (s *Service) HandleProtectedResourceMetadata(w http.ResponseWriter, _ *http
 // Validates client_id, PKCE challenge and redirect_uri, mints a one-shot code,
 // and 302-redirects back to redirect_uri with ?code=&state=.
 func (s *Service) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
+	ip := clientIP(r, s.trustedProxies)
 	if ok, retry := s.authorizeLimiter.Allow(ip); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
@@ -110,7 +110,7 @@ func (s *Service) HandleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip := clientIP(r)
+	ip := clientIP(r, s.trustedProxies)
 	if ok, retry := s.tokenLimiter.Allow(ip); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
