@@ -6,7 +6,7 @@
 	email {$CADDY_EMAIL}
 }
 
-{$CADDY_DOMAIN}:8443 {
+{$CADDY_DOMAIN}:{$CADDY_PORT} {
 	tls {
 		dns route53
 		# Wait for the TXT record to propagate before asking Let's Encrypt to

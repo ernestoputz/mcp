@@ -24,9 +24,10 @@ services:
       dockerfile: Dockerfile
     image: mcp-observability-caddy:local
     ports:
-      - "8443:8443"
+      - "${CADDY_PORT:-443}:${CADDY_PORT:-443}"
     environment:
       CADDY_DOMAIN:          ${CADDY_DOMAIN}
+      CADDY_PORT:            ${CADDY_PORT:-443}
       CADDY_EMAIL:           ${CADDY_EMAIL}
       AWS_ACCESS_KEY_ID:     ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
