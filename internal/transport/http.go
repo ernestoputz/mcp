@@ -34,11 +34,11 @@ func RunHTTP(ctx context.Context, srv *mcp.Server, addr, certFile, keyFile strin
 
 	if oauthSvc != nil {
 		// Public OAuth endpoints — no auth middleware on these.
-		mux.HandleFunc("/.well-known/oauth-authorization-server", oauthSvc.HandleAuthorizationServerMetadata)
-		mux.HandleFunc("/.well-known/oauth-protected-resource", oauthSvc.HandleProtectedResourceMetadata)
-		mux.HandleFunc("/authorize", oauthSvc.HandleAuthorize)
-		mux.HandleFunc("/token", oauthSvc.HandleToken)
-		mux.HandleFunc("/register", oauthSvc.HandleRegister)
+		mux.Handle("/.well-known/oauth-authorization-server", loggingMiddleware(http.HandlerFunc(oauthSvc.HandleAuthorizationServerMetadata)))
+		mux.Handle("/.well-known/oauth-protected-resource", loggingMiddleware(http.HandlerFunc(oauthSvc.HandleProtectedResourceMetadata)))
+		mux.Handle("/authorize", loggingMiddleware(http.HandlerFunc(oauthSvc.HandleAuthorize)))
+		mux.Handle("/token", loggingMiddleware(http.HandlerFunc(oauthSvc.HandleToken)))
+		mux.Handle("/register", loggingMiddleware(http.HandlerFunc(oauthSvc.HandleRegister)))
 		slog.Info("OAuth 2.0 enabled", "issuer", oauthSvc.Issuer())
 	}
 
@@ -108,6 +108,11 @@ func (h *httpHandler) handleRPC(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *httpHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
+	// Claude.ai's Streamable HTTP transport POSTs to this endpoint.
+	if r.Method == http.MethodPost {
+		h.handleRPC(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

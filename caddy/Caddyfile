@@ -15,5 +15,9 @@
 		propagation_delay 60s
 		propagation_timeout 5m
 	}
+	log {
+		output stderr
+		format json
+	}
 	reverse_proxy mcp-observability:8080
 }

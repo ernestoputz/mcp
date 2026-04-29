@@ -114,11 +114,8 @@ func (s *Service) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unsupported_response_type", http.StatusBadRequest)
 		return
 	}
-	_, _, clientFound := s.lookupClient(clientID)
-	if !clientFound {
-		http.Error(w, "invalid_client", http.StatusBadRequest)
-		return
-	}
+	// Accept any client_id — for public clients, security comes from PKCE.
+	// If there's a registered client with a secret, validate it; otherwise treat as public.
 	if redirectURI == "" {
 		http.Error(w, "missing redirect_uri", http.StatusBadRequest)
 		return
@@ -191,14 +188,9 @@ func (s *Service) HandleToken(w http.ResponseWriter, r *http.Request) {
 	if cid, csec, ok := r.BasicAuth(); ok {
 		clientID, clientSecret = cid, csec
 	}
-	expectedSecret, _, clientFound := s.lookupClient(clientID)
-	if !clientFound {
-		s.tokenLimiter.Fail(ip)
-		w.Header().Set("WWW-Authenticate", `Basic realm="mcp"`)
-		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "")
-		return
-	}
-	// Public clients (empty secret) rely on PKCE; skip secret verification.
+	// Look up the client — unknown clients are treated as public (PKCE-only).
+	expectedSecret, _, _ := s.lookupClient(clientID)
+	// Confidential clients (registered with a secret) must present it.
 	if expectedSecret != "" && subtle.ConstantTimeCompare([]byte(clientSecret), []byte(expectedSecret)) != 1 {
 		s.tokenLimiter.Fail(ip)
 		w.Header().Set("WWW-Authenticate", `Basic realm="mcp"`)
